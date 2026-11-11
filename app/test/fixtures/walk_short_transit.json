@@ -1,0 +1,45 @@
+{
+  "status": 0,
+  "type": 2,
+  "result": {
+    "routes": [],
+    "origin": {
+      "city_id": 127,
+      "city_name": "合肥市",
+      "location": {
+        "lng": 117.297401,
+        "lat": 31.803746
+      }
+    },
+    "destination": {
+      "city_id": 127,
+      "city_name": "合肥市",
+      "location": {
+        "lng": 117.297095,
+        "lat": 31.804835
+      }
+    },
+    "total": 0,
+    "taxi": {
+      "distance": 2157,
+      "duration": 193,
+      "remark": "全程2.2公里;2.5公里起步；燃油附加费0.0元；里程超过15.0公里，超过部分每公里收2.9元。",
+      "detail": [
+        {
+          "desc": "白天(05:00-23:00)",
+          "km_price": 1.6,
+          "start_price": 9,
+          "total_price": 9
+        },
+        {
+          "desc": "夜间(23:00-05:00)",
+          "km_price": 1.9,
+          "start_price": 9,
+          "total_price": 9
+        }
+      ]
+    }
+  },
+  "transit_type": 2,
+  "message": "成功"
+}

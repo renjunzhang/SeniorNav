@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 1400px; height: 900px; padding: 34px 48px 30px;
+    font-family: "Noto Sans CJK SC", "Noto Sans CJK JP", sans-serif;
+    background: #eef1f7; color: #16202e; -webkit-font-smoothing: antialiased;
+  }
+  .head { display: flex; align-items: flex-end; justify-content: space-between; border-bottom: 3px solid #16202e; padding-bottom: 14px; }
+  .head h1 { font-size: 38px; }
+  .head .sub { font-size: 17px; color: #5a6678; margin-top: 7px; }
+  .head .tag { font-size: 15px; color: #5a6678; text-align: right; line-height: 1.7; }
+
+  .stage { display: flex; align-items: flex-start; justify-content: center; gap: 34px; margin-top: 26px; }
+  .unit { width: 372px; }
+  .phone {
+    width: 372px; height: 690px; background: #fff; border: 11px solid #10161f;
+    border-radius: 42px; overflow: hidden; position: relative;
+    box-shadow: 0 14px 34px rgba(16,22,31,.22);
+  }
+  .screen { width: 100%; height: 100%; position: relative; background: #fff; }
+  .status { height: 30px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; font-size: 13px; color: #2b3648; font-weight: 700; }
+  .batt { display: flex; gap: 3px; align-items: center; }
+  .batt i { display: block; width: 3px; height: 8px; background: #2b3648; border-radius: 1px; }
+  .batt i:nth-child(1) { height: 5px; } .batt i:nth-child(2) { height: 7px; } .batt i:nth-child(3) { height: 9px; }
+
+  /* ---------- 屏幕一：老人首页 ---------- */
+  .scr1 { background: #f7f9fc; }
+  .welcome { padding: 6px 20px 0; font-size: 15px; color: #6b7889; }
+  .homebtn {
+    margin: 8px 18px 0; height: 120px; border-radius: 24px;
+    background: linear-gradient(160deg, #12a86c, #0b7f52); color: #fff;
+    display: flex; align-items: center; gap: 18px; padding: 0 24px;
+    box-shadow: 0 8px 18px rgba(11,127,82,.28);
+  }
+  .homebtn .ico { width: 62px; height: 62px; border-radius: 18px; background: rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; }
+  .homebtn .txt .t { font-size: 36px; font-weight: 800; letter-spacing: 2px; }
+  .homebtn .txt .s { font-size: 16px; opacity: .92; margin-top: 2px; }
+  .homebtn .hb-arrow { margin-left: auto; font-size: 32px; opacity: .8; flex: none; }
+
+  .seclabel { padding: 14px 22px 8px; font-size: 17px; color: #5d6b7e; font-weight: 700; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 18px; }
+  .tile { background: #fff; border-radius: 18px; padding: 11px 10px; text-align: center; box-shadow: 0 1px 4px rgba(22,32,46,.08); border: 1px solid #e8edf5; }
+  .tile .dot { width: 42px; height: 42px; margin: 0 auto 6px; border-radius: 14px; color: #fff; font-size: 22px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .tile .n { font-size: 20px; font-weight: 700; }
+  .tile .m { font-size: 14px; color: #7c8797; margin-top: 3px; }
+  .d1 { background: #e8564a; } .d2 { background: #ef8a1c; } .d3 { background: #2f9e57; } .d4 { background: #3f7bd6; }
+
+  .tabbar { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 16px 16px; background: linear-gradient(180deg, rgba(247,249,252,0), #f7f9fc 26%); }
+  .seg { display: flex; background: #e4eaf3; border-radius: 16px; padding: 5px; }
+  .seg div { flex: 1; text-align: center; padding: 10px 0; font-size: 20px; font-weight: 700; color: #55637a; border-radius: 12px; }
+  .seg .on { background: #fff; color: #0b5fd0; box-shadow: 0 2px 6px rgba(22,32,46,.12); }
+  .call { margin-top: 10px; height: 64px; border-radius: 18px; background: #1a63d8; color: #fff; font-size: 25px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 10px; letter-spacing: 1px; }
+
+  /* ---------- 屏幕二：百度地图 ---------- */
+  .scr2 { background: #eef2f7; }
+  .mapbg { position: absolute; inset: 30px 0 0 0; background:
+      repeating-linear-gradient(24deg, #dfe9f2 0 2px, transparent 2px 54px),
+      repeating-linear-gradient(-66deg, #e6eef6 0 2px, transparent 2px 62px),
+      radial-gradient(circle at 60% 60%, #cfe3d6, transparent 60%), #f2f6f9; }
+  .bmtop { position: relative; margin: 10px 14px 0; background: #fff; border-radius: 16px; padding: 12px 16px; box-shadow: 0 2px 10px rgba(22,32,46,.12); }
+  .bmtop .way { display: flex; align-items: center; gap: 10px; font-size: 15px; color: #24303f; }
+  .bmtop .way .pin { width: 12px; height: 12px; border-radius: 50%; background: #1a9b57; }
+  .bmtop .way .pin.red { background: #e8564a; }
+  .bmtop .way b { font-size: 16px; }
+  .bmtop .way .d { color: #7c8797; margin-left: auto; }
+  .summary { position: relative; margin: 12px 14px 0; background: #fff; border-radius: 16px; padding: 16px; box-shadow: 0 2px 10px rgba(22,32,46,.12); }
+  .summary .big { font-size: 30px; font-weight: 800; }
+  .summary .big span { font-size: 20px; font-weight: 600; color: #55637a; margin-left: 8px; }
+  .summary .steps { font-size: 15px; color: #6b7889; margin-top: 6px; line-height: 1.5; }
+  .navbtn { position: absolute; left: 16px; right: 16px; bottom: 96px; height: 72px; border-radius: 18px; background: #1a63d8; color: #fff; font-size: 27px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px rgba(26,99,216,.35); }
+  .modes { position: absolute; left: 0; right: 0; bottom: 0; height: 82px; background: #fff; display: flex; border-top: 1px solid #e3e9f2; }
+  .modes div { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 15px; color: #7c8797; gap: 3px; }
+  .modes div.on { color: #1a63d8; font-weight: 800; }
+  .modes .g { font-size: 20px; }
+  .badge { position: absolute; left: 18px; bottom: 184px; background: #0b7f52; color: #fff; font-size: 14px; padding: 7px 12px; border-radius: 999px; box-shadow: 0 3px 8px rgba(11,127,82,.3); }
+
+  /* ---------- 屏幕三：家属设置 ---------- */
+  .scr3 { background: #f7f9fc; }
+  .gahead { padding: 8px 20px 4px; display: flex; align-items: center; gap: 8px; }
+  .gahead .t { font-size: 26px; font-weight: 800; }
+  .lock { font-size: 13px; color: #fff; background: #55637a; border-radius: 999px; padding: 3px 9px; }
+  .hint { padding: 2px 20px 12px; font-size: 14px; color: #7c8797; }
+  .plist { margin: 0 16px; background: #fff; border-radius: 18px; overflow: hidden; box-shadow: 0 1px 4px rgba(22,32,46,.08); }
+  .prow { display: flex; align-items: center; gap: 12px; padding: 15px 16px; border-bottom: 1px solid #eef2f8; }
+  .prow:last-child { border-bottom: 0; }
+  .prow .dot { width: 34px; height: 34px; border-radius: 10px; color: #fff; font-size: 16px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
+  .prow .meta { flex: 1; }
+  .prow .n { font-size: 19px; font-weight: 700; }
+  .prow .a { font-size: 13px; color: #8a95a6; margin-top: 2px; }
+  .prow .mode { font-size: 13px; border-radius: 8px; padding: 4px 8px; font-weight: 700; }
+  .walk { background: #eefaf3; color: #0b7f52; } .bus { background: #eef3fd; color: #1a63d8; }
+  .add { margin: 14px 16px 0; border: 2px dashed #b9c6d8; border-radius: 16px; height: 56px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #4a5a72; font-weight: 700; }
+  .save { position: absolute; left: 16px; right: 16px; bottom: 18px; height: 66px; border-radius: 18px; background: #0b7f52; color: #fff; font-size: 24px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+
+  .cap { margin-top: 16px; text-align: center; }
+  .cap .num { display: inline-flex; width: 30px; height: 30px; border-radius: 50%; background: #16202e; color: #fff; font-size: 16px; font-weight: 800; align-items: center; justify-content: center; }
+  .cap .t { font-size: 20px; font-weight: 800; margin-top: 8px; }
+  .cap .d { font-size: 15px; color: #5a6678; margin-top: 5px; line-height: 1.5; }
+  .arrow { font-size: 30px; color: #9aa7ba; margin-top: 320px; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <div>
+      <h1>做完以后是什么样</h1>
+      <div class="sub">V1 交付形态示意：老人端两次交互内出发，家属端一次配置</div>
+    </div>
+    <div class="tag">SeniorNav · 界面意向图<br>非最终视觉稿，字号/触控按验收下限执行</div>
+  </div>
+
+  <div class="stage">
+    <!-- ① 老人首页 -->
+    <div class="unit">
+      <div class="phone"><div class="screen scr1">
+        <div class="status"><span>9:41</span><span class="batt"><i></i><i></i><i></i></span></div>
+        <div class="welcome">张阿姨，早上好</div>
+        <div class="homebtn">
+          <div class="ico">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-5.5h4V20"/></svg>
+          </div>
+          <div class="txt"><div class="t">回家</div><div class="s">步行 · 1.2 公里</div></div>
+          <div class="hb-arrow">›</div>
+        </div>
+        <div class="seclabel">常去的地方</div>
+        <div class="grid">
+          <div class="tile"><div class="dot d1">医</div><div class="n">人民医院</div><div class="m">公交 · 25 分钟</div></div>
+          <div class="tile"><div class="dot d2">菜</div><div class="n">菜市场</div><div class="m">步行 · 8 分钟</div></div>
+          <div class="tile"><div class="dot d3">园</div><div class="n">街心公园</div><div class="m">步行 · 20 分钟</div></div>
+          <div class="tile"><div class="dot d4">女</div><div class="n">女儿家</div><div class="m">公交 · 40 分钟</div></div>
+        </div>
+        <div class="tabbar">
+          <div class="seg"><div class="on">步行</div><div>公交</div></div>
+          <div class="call">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M6.5 3.5h3l1.5 4-2 1.5a12 12 0 0 0 6 6l1.5-2 4 1.5v3a2 2 0 0 1-2.2 2A17 17 0 0 1 4.5 5.7 2 2 0 0 1 6.5 3.5z"/></svg>
+            联系家人
+          </div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="num">1</div>
+        <div class="t">打开只需要做选择</div>
+        <div class="d">大按钮、大卡片，不用输入任何文字<br>「回家」永远在最上面</div>
+      </div>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <!-- ② 百度地图 -->
+    <div class="unit">
+      <div class="phone"><div class="screen scr2">
+        <div class="status"><span>9:42</span><span class="batt"><i></i><i></i><i></i></span></div>
+        <div class="mapbg"></div>
+        <div class="bmtop">
+          <div class="way"><span class="pin"></span><b>我的位置</b><span class="d">步行</span></div>
+          <div class="way" style="margin-top:8px"><span class="pin red"></span><b>家 · 幸福小区 3 号楼</b></div>
+        </div>
+        <div class="badge">1 次点击到达</div>
+        <div class="summary">
+          <div class="big">18 分钟<span>1.2 公里</span></div>
+          <div class="steps">沿建设路向北 400 米 → 左转进步行街 → 小区东门进入</div>
+        </div>
+        <div class="navbtn">开始导航</div>
+        <div class="modes">
+          <div class="on"><span class="g">🚶</span>步行</div>
+          <div><span class="g">🚌</span>公交</div>
+          <div><span class="g">🚗</span>驾车</div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="num">2</div>
+        <div class="t">点一下，直接到路线</div>
+        <div class="d">百度地图接管路线与语音<br>起点、终点、坐标都已核对，不再搜错</div>
+      </div>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <!-- ③ 家属设置 -->
+    <div class="unit">
+      <div class="phone"><div class="screen scr3">
+        <div class="status"><span>21:06</span><span class="batt"><i></i><i></i><i></i></span></div>
+        <div class="gahead"><div class="t">家属设置</div><div class="lock">已上锁</div></div>
+        <div class="hint">长按或输入 PIN 进入 · 老人日常看不到</div>
+        <div class="plist">
+          <div class="prow"><div class="dot d3">家</div><div class="meta"><div class="n">家</div><div class="a">幸福小区 3 号楼 · 已核对</div></div><div class="mode walk">步行</div></div>
+          <div class="prow"><div class="dot d1">医</div><div class="meta"><div class="n">人民医院</div><div class="a">东门 · 门诊楼入口</div></div><div class="mode bus">公交</div></div>
+          <div class="prow"><div class="dot d2">菜</div><div class="meta"><div class="n">菜市场</div><div class="a">建设路 12 号 · 已核对</div></div><div class="mode walk">步行</div></div>
+          <div class="prow"><div class="dot d4">女</div><div class="meta"><div class="n">女儿家</div><div class="a">滨江花园 6 栋</div></div><div class="mode bus">公交</div></div>
+        </div>
+        <div class="add">＋ 添加地点（搜索并核对位置）</div>
+        <div class="save">保存</div>
+      </div></div>
+      <div class="cap">
+        <div class="num">3</div>
+        <div class="t">家属配一次，长期有效</div>
+        <div class="d">名称、城市、地址、坐标、POI 和默认方式<br>都存下来，换机可导出</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

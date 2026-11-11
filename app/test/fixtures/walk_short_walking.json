@@ -1,0 +1,72 @@
+{
+  "status": 0,
+  "message": "ok",
+  "info": {
+    "copyright": {
+      "text": "@2026 Baidu - Data",
+      "imageUrl": "http://api.map.baidu.com/images/copyright_logo.png"
+    }
+  },
+  "type": 2,
+  "result": {
+    "routes": [
+      {
+        "distance": 95,
+        "duration": 81,
+        "steps": [
+          {
+            "leg_index": 0,
+            "area": 0,
+            "direction": 352,
+            "distance": 95,
+            "duration": 81,
+            "instructions": "向正北方向出发,走100米,到达<b>终点</b>",
+            "name": "",
+            "path": "117.297934,31.803773;117.297864,31.804274;117.297864,31.804414;117.297854,31.804524;117.297845,31.804634",
+            "pois": [],
+            "type": 5,
+            "turn_type_id": 0,
+            "stepOriginLocation": {
+              "lng": 117.297934,
+              "lat": 31.803773
+            },
+            "stepDestinationLocation": {
+              "lng": 117.297845,
+              "lat": 31.804634
+            },
+            "stepOriginInstruction": "",
+            "stepDestinationInstruction": ""
+          }
+        ],
+        "originLocation": {
+          "lng": 117.297844,
+          "lat": 31.803764
+        },
+        "destinationLocation": {
+          "lng": 117.297764,
+          "lat": 31.804635
+        }
+      }
+    ],
+    "origin": {
+      "area_id": 0,
+      "cname": "",
+      "uid": "",
+      "wd": "",
+      "originPt": {
+        "lng": 117.297401,
+        "lat": 31.803746
+      }
+    },
+    "destination": {
+      "area_id": 0,
+      "cname": "",
+      "uid": "",
+      "wd": "",
+      "destinationPt": {
+        "lng": 117.297095,
+        "lat": 31.804835
+      }
+    }
+  }
+}

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 1400px; height: 900px;
+    font-family: "Noto Sans CJK SC", "Noto Sans CJK JP", sans-serif;
+    background: #eef1f7; color: #16202e; padding: 40px 48px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .head { display: flex; align-items: flex-end; justify-content: space-between; border-bottom: 3px solid #16202e; padding-bottom: 16px; }
+  .head h1 { font-size: 40px; letter-spacing: 1px; }
+  .head .sub { font-size: 17px; color: #5a6678; margin-top: 8px; }
+  .head .tag { font-size: 15px; color: #5a6678; text-align: right; line-height: 1.7; }
+
+  .cols { display: flex; gap: 22px; margin-top: 26px; }
+  .card { background: #fff; border-radius: 18px; padding: 24px 24px 22px; flex: 1; box-shadow: 0 2px 10px rgba(22,32,46,.07); border-top: 6px solid #94a3b8; }
+  .card.v1 { border-top-color: #0f9d63; }
+  .card.m0 { border-top-color: #e08a00; }
+  .card.v2 { border-top-color: #7c4fe0; }
+  .card .kicker { font-size: 14px; letter-spacing: 2px; color: #7c8797; font-weight: 700; }
+  .card h2 { font-size: 27px; margin: 6px 0 4px; }
+  .card .goal { font-size: 16px; color: #47536a; margin-bottom: 16px; line-height: 1.5; }
+  ul { list-style: none; }
+  li { font-size: 17px; line-height: 1.55; padding: 9px 0 9px 30px; position: relative; border-bottom: 1px dashed #e3e8f0; }
+  li:last-child { border-bottom: 0; }
+  li::before { content: ""; position: absolute; left: 6px; top: 18px; width: 10px; height: 10px; border-radius: 3px; background: #c7d0dd; }
+  .v1 li::before { background: #0f9d63; }
+  .m0 li::before { background: #e08a00; }
+  .v2 li::before { background: #7c4fe0; }
+  li b { font-weight: 700; }
+  .m0 li { font-size: 16.5px; padding-left: 30px; }
+  .m0 .verdict { margin-top: 14px; background: #fff7e6; border: 1px solid #f0d29a; border-radius: 10px; padding: 12px 14px; font-size: 15.5px; color: #7a5200; line-height: 1.5; }
+  .v1 .note { margin-top: 14px; background: #eefaf3; border: 1px solid #b9e4cd; border-radius: 10px; padding: 12px 14px; font-size: 15.5px; color: #0b6b45; line-height: 1.5; }
+  .v2 .note { margin-top: 14px; background: #f3efff; border: 1px solid #d5c7fb; border-radius: 10px; padding: 12px 14px; font-size: 15.5px; color: #4a2b9c; line-height: 1.5; }
+
+  .band { margin-top: 24px; background: #16202e; color: #dbe3ef; border-radius: 18px; padding: 20px 26px; display: flex; gap: 26px; align-items: center; }
+  .band .label { font-size: 15px; letter-spacing: 2px; color: #ff8f8f; font-weight: 700; white-space: nowrap; }
+  .band .items { display: flex; gap: 10px; flex-wrap: wrap; }
+  .band .chip { border: 1px solid #3c4a60; border-radius: 999px; padding: 7px 15px; font-size: 16px; color: #c9d4e4; }
+  .band .chip.s { border-style: dashed; color: #8b98ab; }
+
+  .foot { margin-top: 18px; display: flex; justify-content: space-between; font-size: 15.5px; color: #55627a; }
+  .foot b { color: #16202e; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <div>
+      <h1>SeniorNav · 方案一图看懂</h1>
+      <div class="sub">老年人出行导航 ｜ 不重做地图，只把「常去的地方」变成一次点击</div>
+    </div>
+    <div class="tag">方案 v0.1　·　2026-11-11<br>状态：方向已定，M0 待真机验证</div>
+  </div>
+
+  <div class="cols">
+    <div class="card v1">
+      <div class="kicker">V1 · 先交付</div>
+      <h2>家属配一次，老人点一下</h2>
+      <div class="goal">纯本机、无账号、无服务器</div>
+      <ul>
+        <li>家属在老人手机上录入 <b>≥5 个常去地点</b>（家、医院、菜市场、子女家），逐一核对地图位置</li>
+        <li>老人打开 App：顶部一个巨大的「<b>回家</b>」，下面是大卡片列表</li>
+        <li>点地点 → 百度地图直接打开<b>正确目的地</b>的路线</li>
+        <li>底部「步行 / 公交」一键切换，「联系家人」直接拨号</li>
+      </ul>
+      <div class="note">没有网络也能点：地图和拨号都由手机自带应用接管。</div>
+    </div>
+
+    <div class="card m0">
+      <div class="kicker">M0 · 先验证（1–2 天）</div>
+      <h2>四个问题，真机问百度</h2>
+      <div class="goal">答不上来就不写 V1 界面，避免白做</div>
+      <ul>
+        <li>步行能不能<b>一键进导航</b>（walknavi）</li>
+        <li>起点怎么给：省略 / 我的位置 / 坐标</li>
+        <li>手机 GPS 起点 + 百度终点，<b>偏移几米</b></li>
+        <li>公交要<b>几次点击</b>才到某条线路</li>
+      </ul>
+      <div class="verdict">结论写进 <b>docs/m0/</b> 并录屏。M0 不过，就换方案（如百度 Android SDK），而不是回头改界面。</div>
+    </div>
+
+    <div class="card v2">
+      <div class="kicker">V2 · V1 稳定后</div>
+      <h2>家属远程守护</h2>
+      <div class="goal">V1 连续试用约 1 周无阻断缺陷才开工</div>
+      <ul>
+        <li>配对码一次，家属用<b>手机浏览器</b>就能增改地点</li>
+        <li>看最新位置，带<b>时间、精度、是否过期</b></li>
+        <li>SOS：先拨号，再联网求助；家属可确认</li>
+        <li>撤权 1 分钟内生效，位置不做公开链接</li>
+      </ul>
+      <div class="note"><b>电话永远是兜底</b>。SOS 不替代 110/120，也不承诺救援到达。</div>
+    </div>
+  </div>
+
+  <div class="band">
+    <div class="label">明确不做</div>
+    <div class="items">
+      <div class="chip">自研地图 / 路径规划</div>
+      <div class="chip">AI 迷路识别</div>
+      <div class="chip">公交实时到站推送</div>
+      <div class="chip">自动全程语音导航</div>
+      <div class="chip">替代 110 / 120</div>
+      <div class="chip s">独立家属 App（用 H5）</div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div>验收口径：步行 <b>≤1 次点击</b>进导航 ｜ 公交 <b>≤2 次</b>到线路详情 ｜ 正文 <b>≥18sp</b> ｜ 主按钮 <b>≥56dp</b> ｜ 对比度 <b>≥4.5:1</b></div>
+    <div><b>评审结论：可以开工，先补 5 个 P0</b></div>
+  </div>
+</body>
+</html>

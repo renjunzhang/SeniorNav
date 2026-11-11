@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# SeniorNav pre-push guard
+# 扫描"即将推送的历史"（不只是当前工作区），兜底 --no-verify 或安装钩子之前的提交。
+# 只报告结果，不打印敏感内容；详见 docs/GIT_COMMIT_RULES.md
+set -uo pipefail
+
+red()  { printf '\033[31m%s\033[0m\n' "$*" >&2; }
+
+zero=0000000000000000000000000000000000000000
+ranges=()
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [[ "$local_sha" == "$zero" ]] && continue
+  if [[ "$remote_sha" == "$zero" ]]; then
+    ranges+=("$local_sha")
+  else
+    ranges+=("$remote_sha..$local_sha")
+  fi
+done
+((${#ranges[@]})) || exit 0
+
+git_dir=$(git rev-parse --absolute-git-dir)
+terms_file="$git_dir/privacy-terms"
+term_args=()
+if [[ -f "$terms_file" ]]; then
+  while IFS= read -r t; do
+    t="${t%$'\r'}"
+    [[ -z "$t" || "$t" == \#* ]] && continue
+    term_args+=(-e "$t")
+  done < "$terms_file"
+fi
+
+blocked='(^|/)(\.env(\..*)?|id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|[^/]*\.(pem|key|p12|pfx|jks|keystore|mobileprovision|provisionprofile)|key\.properties|local\.properties|google-services\.json|secrets?\.(json|ya?ml|txt))$'
+secret_re='-----BEGIN ([A-Z0-9]+ )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|xox[baprs]-[A-Za-z0-9-]{10,}|(^|[^A-Za-z0-9])(BAIDU|MAP|API|SECRET|ACCESS|PRIVATE)[_-]?(KEY|AK|TOKEN|SECRET)[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9_./+-]{16,}|(^|[^A-Za-z0-9_])(ak|api_?key|apikey|token|secret|password|passwd|pwd)[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']{24,}["'"'"']'
+
+fail=0
+for range in "${ranges[@]}"; do
+  # 用变量承接输出：避免 pipefail + grep -q 的 SIGPIPE 让“命中”被误判为失败
+  names=$(git log --name-only --format= "$range" 2>/dev/null || true)
+  patch=$(git log -p --no-color --format='commit %H%n%B' "$range" 2>/dev/null || true)
+
+  # 1) 历史上出现过的敏感文件名
+  if grep -qE -- "$blocked" <<<"$names"; then
+    red "待推送历史中包含凭据/本机配置文件名，请清理历史后再推送。"
+    fail=1
+  fi
+
+  # 2) 历史补丁/提交信息中的高置信度密钥
+  if grep -qE -- "$secret_re" <<<"$patch"; then
+    red "待推送历史中含疑似密钥/Token（内容已隐藏）。请用 gitleaks detect 定位并清理。"
+    fail=1
+  fi
+
+  # 3) 历史补丁/提交信息中的本地隐私词
+  if ((${#term_args[@]})); then
+    if grep -qF "${term_args[@]}" <<<"$patch"; then
+      red "待推送历史中命中本地隐私词（内容已隐藏）。请先脱敏再推送。"
+      fail=1
+    fi
+  fi
+done
+
+if ((fail)); then
+  cat >&2 <<'EOF'
+------------------------------------------------------------
+推送已阻止。清理方式见 docs/GIT_COMMIT_RULES.md §8：
+1) 先轮换泄露的密钥；2) git filter-repo 清理历史；3) 再 push --force。
+如果这是空仓库的首次推送，直接修改工作区并重新提交即可。
+------------------------------------------------------------
+EOF
+  exit 1
+fi
+
+exit 0

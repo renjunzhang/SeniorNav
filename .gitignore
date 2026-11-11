@@ -1,0 +1,70 @@
+# ============================================================
+# SeniorNav .gitignore
+# 规则：密钥/凭据、本机配置、构建产物、日志、IDE 文件一律不入库
+# 详见 docs/GIT_COMMIT_RULES.md
+# ============================================================
+
+# ---- 密钥与凭据 ----
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+key.properties
+local.properties
+google-services.json
+*.mobileprovision
+*.provisionprofile
+secrets/
+**/secrets/
+
+# ---- 本地隐私词表（供 pre-commit 使用，永不入库）----
+privacy-terms.txt
+.githooks/private-patterns.local
+
+# ---- 真实地点数据（住址/精确坐标/POI UID，见 GIT_COMMIT_RULES §3）----
+# .env.* 已覆盖 tools/.env.places，这里显式写出以免被误改后失效。
+tools/.env.places
+
+# ---- Python 缓存 ----
+__pycache__/
+*.pyc
+
+# ---- 浏览器自动化临时输出（页面快照可能含控制台/账号信息）----
+.playwright-mcp/
+
+# ---- Flutter / Dart 构建产物 ----
+app/build/
+app/.dart_tool/
+app/.flutter-plugins-dependencies
+app/.pub-cache/
+app/coverage/
+
+# ---- Android 构建与本机配置 ----
+app/android/.gradle/
+app/android/local.properties
+app/android/app/debug/
+app/android/app/profile/
+app/android/app/release/
+*.apk
+*.aab
+*.ipa
+
+# ---- IDE / 系统 ----
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ---- 日志与临时文件 ----
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
