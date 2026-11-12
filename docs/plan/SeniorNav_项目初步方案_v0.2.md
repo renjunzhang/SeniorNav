@@ -71,7 +71,7 @@ SeniorNav 不是地图软件，也不是导航软件，而是一个**极简出�
 | 路线摘要 | 公交/步行摘要、自动推荐 | 沿用 V1 | 自研路径规划 |
 | 导航 | 按需调起百度地图 | 沿用 V1 | 自研导航、语音播报 |
 | 家属配置 | 在老人手机上进入家属模式 | 账号、配对、远程同步 | 家属原生 App |
-| 数据 | 本机 Drift/SQLite | 本地优先 + 同步 | 云端轨迹、位置历史 |
+| 数据 | 本机 sqflite/SQLite | 本地优先 + 同步 | 云端轨迹、位置历史 |
 | 账号/后端 | 无业务后端；按需代理 | 家属账号、配对权限 | 用户运营平台 |
 | SOS/守护 | 不做 | 不做 | 本期任何形式 |
 | iOS | 保留架构适配接口 | 可独立移植验收 | 本期上线承诺 |
@@ -149,6 +149,7 @@ SeniorNav 不是地图软件，也不是导航软件，而是一个**极简出�
 - `instructions` 含 HTML 标签（`走20米,<b>左转</b>`），展示前必须去标签。
 - 站数直接写"坐 6 站"。`stop_num` 的语义已实测确认：等于**站间数**（不含上车站、含下车站），恒等于 `stop_info` 长度 + 1，5 个乘车段样本全部吻合，因此不需要降级成"6 站左右"（ADR 0002 A3）。
 - 线路名、站名不截断；长名称换行显示，不缩小字号。实测站名带出入口字母（`合肥南站(C口)`、`大蜀山站(C口)`），排版要按这个长度设计。
+- **换乘步行必须可见，并进换乘行**：写成「步行约 500 米，换 320路（开往 …），10 站，XX下车」，不单独占一行——4 行预算下单独一行会把「换哪路车」挤掉。实测 `metro_direct` 方案 2 总步行 941 米，其中 495 米是换乘步行；修复前文案只印 60 + 390 米，老人看不到下车后还要走半公里。同站换乘（`boardWalkM == 0`）不写「步行约 0 米」。
 - 摘要最多 6 行：总时长 1 行 + 换车提示 1 行 + 步骤最多 4 行。超过 4 段就截断，末行写"之后的换乘请打开百度地图查看"；更细的步骤交给百度地图。
 - 按本节规则、用真实录制的百度响应渲染出的三张样张见 `docs/m0/纸面摘要样张.md`，即 M0 任务 3 的朗读测试材料。样张由 `app/tool/render_paper_summary.dart` 生成，不手抄。
 
@@ -204,6 +205,7 @@ SeniorNav 不是地图软件，也不是导航软件，而是一个**极简出�
 | 接口返回成功但结构变了 | 同上。必须捕获，不能白屏——百度升级接口时会走到这条路径 |
 | 当前不在运营时段 | 摘要照给，但加一行"XX线 首班 06:12，现在可能还没发车" |
 | 百度地图未安装 | 安装指引 + 网页版路线链接 |
+| 百度地图版本过旧 | 同上，走网页回退。**`walknavi` 需客户端 ≥ 8.8，低于 8.6.9 完全不支持步行导航**（`flutter_baidu_mapapi_utils` 的 `bmf_open_navi_options.dart:9-22` 版本注释，ADR 0004 事实 6）。老人手机上的百度地图很可能长期未更新，调起会静默失败，因此不能把「已安装」当成「能导航」。M0 任务 4 必须记录客户端版本号 |
 | 没有公交方案 | 展示步行方案；步行也太远则提示 |
 | 查询超过 5 秒 | 显示"仍在查询…" + 可直接打开百度地图 |
 
@@ -233,7 +235,7 @@ Flutter Android
         │                   A. 无服务器函数代理 Web API
         │                   B. 百度 Android SDK 本地检索
         │
-  PlaceRepository（Drift/SQLite）       LocationProvider（前台一次定位）
+  PlaceRepository（sqflite/SQLite）     LocationProvider（前台一次定位）
         │
   NavigationLauncher ──→ 百度地图客户端（walknavi / direction）
 ```
@@ -318,7 +320,7 @@ result.routes[]                # duration / distance / price / price_detail / ar
 | `legs[].boardStop` / `alightStop` | `detail.on_station` / `off_station` | 纯字符串 |
 | `legs[].stopCount` | `detail.stop_num` | 站间数，直接用于"坐 N 站" |
 | `legs[].firstTime` / `lastTime` | `detail.first_time` / `last_time` | 用于运营时段校验 |
-| `legs[].boardWalkM` | 该段之前的步行距离 | 渲染"① 步行约 710 米 → XX站" |
+| `legs[].boardWalkM` | 该段之前的步行距离 | 首段渲染「① 步行约 710 米 → XX站」；后续段并进换乘行「步行约 500 米，换 …」，不单独占行（§3.3） |
 | `transfers` | 派生：`legs.length − 1` | 换乘次数。做成派生属性，避免两处各算一遍 |
 | `crossingCount` | walking `steps[].instructions` 关键词命中数 | 过街提示，尽力而为 |
 | `arriveTime` | `routes[].arrive_time` | 仅展示，不参与推荐 |
@@ -335,7 +337,7 @@ result.routes[]                # duration / distance / price / price_detail / ar
 - 文案由固定模板生成，禁止大模型改写；每个字段缺失时要有降级文案，不能编造（方向缺失就整段省略括号，不写"开往 未知 方向"）。
 - 必须校验 `first_time`/`last_time`；非运营时段加告警行，不能照印（ADR 0002 A7）。
 - 摘要页显示"查询时间"；超过 5 分钟提示"重新查询"。
-- 开发期用真实 JSON 录制 fixture 做单元测试；演示数据只允许出现在 debug 包。fixture 在 `app/test/fixtures/`，测试在 `app/test/baidu_route_parser_test.dart`、`app/test/route_summary_test.dart` 与 `app/test/baidu_uri_test.dart`（共 72 个用例）。
+- 开发期用真实 JSON 录制 fixture 做单元测试；演示数据只允许出现在 debug 包。fixture 在 `app/test/fixtures/`，测试在 `app/test/baidu_route_parser_test.dart`、`app/test/route_summary_test.dart` 与 `app/test/baidu_uri_test.dart`（共 76 个用例）。
 - Release 包增加一条测试：不得包含演示线路常量。
 - 票价（`price`/`price_detail`）实测存在但本结构未包含；对老人有价值，是否加入待评估。
 
@@ -348,7 +350,7 @@ result.routes[]                # duration / distance / price / price_detail / ar
 
 ### 4.6 地点与数据
 
-V1 数据模型（本地 Drift）：
+V1 数据模型（本地 sqflite，手写 schema 与迁移，不用代码生成——见 ADR 0005）：
 
 | 字段 | 说明 |
 |---|---|
@@ -365,7 +367,7 @@ V1 数据模型（本地 Drift）：
 | `verifiedAt` | 家属在地图上确认过入口的时刻；为 null 表示尚未核对（§6.2 验收要求"位置核对"，没有这个字段就无法区分核对过和没核对过的地点） |
 | `deletedAt` | 软删除墓碑。V2 同步必须能传播删除，否则家属删掉的地点会在老人端复活 |
 
-表级字段：`schemaVersion`（本地库结构版本，写在 Drift 的 schema 里，不是每条地点一行）。
+表级字段：`schemaVersion`（本地库结构版本，用 SQLite 的 `PRAGMA user_version`，即 `openDatabase(version: n)`，不是每条地点一行）。
 
 - `slot` 只管首页四个固定位置，不能替代 `sortOrder`：slot 只有 1／2–4／0 三档，撑不起"更多地点"的任意排序。
 - 保留 `rev` 就必须同时保留 `deletedAt`。冲突解决用 `rev`（服务端权威）而不是 `updatedAt`——时钟漂移会让"最后写入"不可靠（评审意见 P1-3）。
@@ -392,14 +394,14 @@ app/lib/
 │   ├── places/        # 更多地点、家属设置
 │   └── settings/
 ├── core/              # 主题、异常、权限、平台适配
-└── data/              # Drift、Repository、摘要服务
+└── data/              # sqflite、Repository、摘要服务
 ```
 
 | 层次 | 选型 | 说明 |
 |---|---|---|
 | 移动端 | Flutter + Dart | 只交付 Android，保留 iOS 适配层 |
 | 状态管理 | Riverpod | 简单、可测试 |
-| 本地存储 | Drift + SQLite | 地点与设置；不做路线持久化 |
+| 本地存储 | sqflite + 系统 SQLite | 地点与设置；不做路线持久化。不用 Drift：单表约 20 行、无 join，代码生成与构建期下载 `.so` 的收益为零（ADR 0005） |
 | 定位 | Android 前台定位（geolocator 或平台通道） | 一次定位 |
 | 路线 | 百度 Web API 代理 或 Android SDK | M0 决策 |
 | 导航调起 | url_launcher + 百度 URI | 步行 walknavi；公交 direction |
@@ -407,7 +409,7 @@ app/lib/
 
 本地数据的泄露面（评审意见 P1-1）：
 
-- Flutter 模板默认 `allowBackup=true`，SQLite 里的家庭地址会被系统云备份带走。必须设 `android:allowBackup="false"`，或用 backup rules 排除 Drift 数据库文件。当前工程已设（`app/android/app/src/main/AndroidManifest.xml`）。
+- Flutter 模板默认 `allowBackup=true`，SQLite 里的家庭地址会被系统云备份带走。必须设 `android:allowBackup="false"`，或用 backup rules 排除 sqflite 数据库文件。当前工程已设（`app/android/app/src/main/AndroidManifest.xml`）。
 - 家属入口的 PIN **只防误触，不防取证**。威胁模型里要写明这一点，不能让人误以为地点数据被加密保护了。
 - 侧载分发意味着没有商店的自动升级通道，版本号可见与诊断导出见 §10 D8。
 
@@ -518,10 +520,10 @@ V1 连续日常试用 1 周，路线摘要未出现"指错方向/错站"的阻�
 
 | 编号 | 决策 | 建议 | 状态 | 截止 |
 |---|---|---|---|---|
-| D1 | Web API 代理 vs Android SDK | M0 先测 SDK；不行再代理 | **未决**。A 侧字段已验证够用（ADR 0002 A1）；B 侧静态探针完成、运行时探针已可编译（ADR 0003），但**检索一次都没发起**，缺 Android-端 AK 与真机 | M0 |
+| D1 | Web API 代理 vs Android SDK | M0 先测 SDK；不行再代理 | **未决**。A 侧字段已验证够用（ADR 0002 A1）；B 侧静态探针完成、运行时探针已可编译（ADR 0003），**接法已定：自建薄通道，不用官方 Flutter 检索插件**（ADR 0004 D1，插件丢 `direct_text`）。但**检索一次都没发起**，缺 Android-端 AK 与真机 | M0 |
 | D2 | 默认公交策略 | 改为推荐（0）；换乘 ≥ 1 时用少换乘（1）重查 | **已修订**，原建议（少步行 2）实测是净损失，见 §4.3 | 已定，待 §6.3 复核 |
 | D3 | 摘要与百度不一致时的话术 | "以百度地图为准"；差异大则弱化公交摘要 | 未决 | M3 |
-| D4 | 地点检索来源 | 与 D1 同源（SDK 或代理） | 未决，依赖 D1 | M0 |
+| D4 | 地点检索来源 | 与 D1 同源（SDK 或代理） | **有条件结论**：D1 选 B 时可复用官方插件的 POI/Suggestion 部分（`naviLocation` 与出入口 uid 现成，满足 ADR 0001 D2）；D1 选 A 则走代理，不引入插件。见 ADR 0004 D2 | M0 |
 | D5 | V2 是否含位置共享 | 默认不含，另立评估 | 未决 | V2 立项前 |
 | D6 | 家属设置入口 | 长按 2 秒 + PIN；真机测误触率 | 未决，需真机 | M1 |
 | D7 | 部署形态 | 单家庭自用、侧载、不上架 | **已定**，写入 §1.5 | 已定 |
@@ -529,6 +531,8 @@ V1 连续日常试用 1 周，路线摘要未出现"指错方向/错站"的阻�
 | D9 | 是否支持高德 | `NavigationLauncher` 抽象成 provider；V1 只实现百度；M0 记录目标机实装了哪些地图 App | 未决（评审意见 P1-9） | M1 |
 | D10 | 迷路时的入口 | 桌面小组件或静态快捷方式"回家/联系家人"，把步骤降到 1 次点击 | 未决。与 §1.3"先摘要后导航"契合度最高的一条，但会绕过摘要页，需先想清楚（评审意见 P1-10） | M2 |
 | D11 | 配置丢失 | 导出/导入（二维码或文件） | 未决，可放 V1.1（评审意见 P1-11） | V1.1 |
+| D12 | 本地持久化 | sqflite + 手写 schema/迁移，不用 Drift | **已定**（ADR 0005）。单表约 20 行、无 join，Drift 的代码生成与构建期从 GitHub 下载 `.so` 收益为零。改选型时一行持久化代码都还没写，重构成本为零 | 已定 |
+| D13 | 起点坐标转换 | `coordtransform_dart` 本地 `wgs84ToBd09` | **已定**（ADR 0001 D3 + 事实 7）。与官方 geoconv 逐点交叉验证通过：15 点最大偏差 0.71 米，`gcj02ToBd09` 半段一致到 0.0001 米。**D3 不再依赖 AK**，与 P0-2 解绑 | 已定 |
 
 > 本项目是单人开发，评审意见建议的"负责人"列没有信息量，故省略；"截止"用里程碑锚点，绝对日期由项目所有者填。
 
@@ -536,11 +540,11 @@ V1 连续日常试用 1 周，路线摘要未出现"指错方向/错站"的阻�
 
 1. ✅ 用百度 Web API 查 3 条真实线路（直达、换乘、地铁），记录字段、耗时、配额 —— 见 `docs/adr/0002`；原始响应录制在 `app/test/fixtures/`。
 2. 🔶 用 Android SDK 做同样 3 条，比较字段、延迟、APK 增量、是否需要地图视图 —— **静态部分已完成**（制品/体积/字段表面/不需 MapView，见 `docs/adr/0003`）；运行时探针已可编译（`tools/sdk-probe/`，同样 3 条 OD），但**一次检索都没发起**，缺 Android-端 AK 与真机，D1 仍卡在这里。
-3. 🔶 按本方案 3.3 做纸面摘要，找实际老人读一遍 —— 样张已由真实数据生成（`docs/m0/纸面摘要样张.md`），**老人朗读测试未做**。
-4. ⬜ 记录目标机型、Android 版本、百度地图版本、系统字体设置 —— 需要真机，清单见 `docs/m0/真机导航测试清单.md`。
-5. 🔶 结论写入 `docs/adr/`，再决定 D1 —— ADR 0001（坐标系）、0002（Web API 侧）、0003（SDK 静态探针）已写；D1 仍需任务 2 的运行时部分才能关闭。
+3. 🔶 按本方案 3.3 做纸面摘要，找实际老人读一遍 —— 样张已由真实数据生成（`docs/m0/纸面摘要样张.md`），**含一张 1 次换乘的附加样张**（前三张推荐方案都是 0 换乘，测不到「换几次车」「下车走多远」两问）。**老人朗读测试未做**。
+4. ⬜ 记录目标机型、Android 版本、**百度地图版本号**、系统字体设置 —— 需要真机，清单见 `docs/m0/真机导航测试清单.md`。版本号是硬指标：`walknavi` 需客户端 ≥ 8.8，低于 8.6.9 完全不支持步行导航（§3.7、ADR 0004 事实 6），只记「已安装」不够。
+5. 🔶 结论写入 `docs/adr/`，再决定 D1 —— ADR 0001（坐标系，D3 已按交叉验证修订）、0002（Web API 侧）、0003（SDK 静态探针）、0004（官方插件评估与薄通道）、0005（sqflite）已写；D1 仍需任务 2 的运行时部分才能关闭。
 
-任务 1 的产出已落成可执行代码：解析器 `app/lib/baidu_route_parser.dart`、摘要模型与文案规则 `app/lib/route_summary.dart`、URI 构造 `app/lib/baidu_uri.dart`，共 72 个单元测试。也就是说 §4.4 的字段映射不再是文档里的断言，改错了测试会红。
+任务 1 的产出已落成可执行代码：解析器 `app/lib/baidu_route_parser.dart`、摘要模型与文案规则 `app/lib/route_summary.dart`、URI 构造 `app/lib/baidu_uri.dart`，共 76 个单元测试。也就是说 §4.4 的字段映射不再是文档里的断言，改错了测试会红。
 
 ---
 
@@ -559,7 +563,8 @@ V1 连续日常试用 1 周，路线摘要未出现"指错方向/错站"的阻�
 - `/place/v3/search` 返回 **HTTP 404**，不可用；实测可用的是 `/place/v2/search`、`/place/v3/suggestion` 与 `/place/v3/detail`。
 - `/place/v3/suggestion` 返回 15 位小数坐标，`/place/v2/search` 只返回 6 位。要精确坐标就用 suggestion 或 detail。
 - v0.1 附录里"地点输入提示"的标题配的是"地点检索"的链接，是两个接口；本期两者都要用：输入提示给候选，地点详情给精确坐标与 UID。
-- 坐标转换用 `/geoconv/v2/?model=`，`model` 取值 1 高德→BD09、2 GPS→BD09、3 BD09ll→BD09mc、4 BD09mc→BD09ll、5 BD09ll→GCJ02、6 BD09mc→GCJ02。**没有 BD09ll→GCJ02/WGS84 的反向转换**，§4.6"GPS 起点按需转换"要走 model=2 正向转到 BD-09，而不是把 BD-09 转回去。
+- 坐标转换用 `/geoconv/v2/?model=`，实测语义：1 GCJ02→bd09ll、2 WGS84→bd09ll、3 bd09ll→bd09mc、4 bd09mc→bd09ll、5 bd09ll→GCJ02、6 用 bd09ll 输入时与 4 同输出。**model=5 就是 bd09ll→GCJ02**；不存在的是 **bd09ll→WGS84**（model ≥ 7 返回 `status=29 param error:model illegal`）。所以 §4.6"GPS 起点按需转换"只能正向转到 BD-09，不能把 BD-09 转回 GPS。
+- **V1 客户端不调这个接口**：起点转换用 `coordtransform_dart` 的 `wgs84ToBd09` 本地完成，已与官方 model=2 在 15 个点上交叉验证（最大偏差 0.71 米），不需要 AK、不需要网络。官方接口只作校验基准。见 ADR 0001 事实 7 与 D3、`tools/coord-check/README.md`。
 
 ## 附录 B｜版本变更
 
@@ -569,12 +574,13 @@ V1 连续日常试用 1 周，路线摘要未出现"指错方向/错站"的阻�
 | v0.2 | 2026-11-12 | 定位改为"极简出行决策助手"；首页固定五个按钮；先摘要后导航；删除 SOS/守护；路线摘要基于百度路线 API；V2 收敛为家属远程地点配置 |
 | v0.2 修订 | 2026-11-12 | 按 ADR 0002 的实测结果与评审意见回写：§1.5 新增部署形态；§3.3 解除 `stop_num` 措辞限制、补首末班与过街提示规则；§3.4 明确自上而下匹配与"没有公交方案"的判据；§4.3 修正响应结构层级、默认策略由 2 改 0、补并发与两套枚举冲突；§4.4 扁平字段改为 `legs[]`、`direction` 改取 `direct_text`；§4.6 补 `sortOrder`/`verifiedAt`/`deletedAt`/`schemaVersion`；§4.8 补 `allowBackup`；§5.1 `NavigationLauncher` 抽象成 provider；§10 决策表加 D7–D11 与状态/截止列；附录 A 补地点检索与坐标转换的实测注意事项 |
 | v0.2 修订 2 | 2026-11-12 | 按 ADR 0002 §2.11 与 ADR 0003 回写：§4.4 `walkM` 计入 `trans_type==4`、`legs[]` 改为按组取首条车辆段、绕路过滤给出 M0 暂定阈值；§10 的 D1 与 M0 任务 2/4/5 状态更新；单元测试 43 → 72 |
+| v0.2 修订 3 | 2026-11-12 | 吸收 `docs/research/开源项目复用调研.md`，按 ADR 0004/0005 与 ADR 0002 §2.12–2.13 回写：持久化 Drift → **sqflite**（§2/§4.1/§4.6/§4.7/§4.8，`schemaVersion` 改 `PRAGMA user_version`）；§3.3 补换乘步行并入换乘行的文案规则、§4.4 同步 `legs[].boardWalkM`；§3.7 新增"百度地图版本过旧"降级行；§10 新增 D12（sqflite）D13（coordtransform_dart），D1 改为自建原生薄通道、D4 改为有条件复用官方 POI 插件；附录 A 更正 `geoconv` model 语义（model=5 确为 bd09ll→GCJ02）并写明客户端本地转换；单元测试 72 → 76 |
 
 ---
 
 **文档状态**：v0.2 为交互冻结稿，本次修订只更正事实错误与补齐字段，未改动交互设计。M0 完成以下三项后升级 v0.3：
 
-1. SDK 与无服务器代理的对比结论 —— **静态部分已完成**（ADR 0003：字段表面 13/13、不需 MapView、arm64 增量约 3.1 MiB），运行时对比未做，D1 仍开放；
+1. SDK 与无服务器代理的对比结论 —— **静态部分已完成**（ADR 0003：字段表面 13/13、不需 MapView、arm64 增量约 3.1 MiB），**实现形态已定**（ADR 0004：官方 Flutter 插件丢 `direct_text`，改自建原生薄通道），但运行时对比未做，D1 仍开放；
 2. 3 条真实线路的摘要字段与文案确认 —— **已完成**，见 ADR 0002 与 `docs/m0/纸面摘要样张.md`；
 3. 老人对纸面摘要的理解测试结果 —— **未做**，样张已就绪。
 

@@ -5,6 +5,7 @@
 | `plan/` | 项目方案与评审意见 | **当前口径是 `plan/SeniorNav_项目初步方案_v0.2.md`** |
 | `adr/` | 架构决策记录，编号递增 | 有效 |
 | `m0/` | M0 技术验证的产出与记录 | 进行中 |
+| `research/` | 开源项目复用调研（源码级取证） | 有效，结论已回写进 ADR 0001/0004/0005 与方案 |
 | `figures/` | 方案配图 | **已过期**，见 `figures/README.md` |
 | `GIT_COMMIT_RULES.md` | 提交规范与隐私红线，配套钩子在 `.githooks/` | 有效 |
 
@@ -17,13 +18,19 @@
 
 ## adr/
 
-- `0001-坐标系统一为BD09.md` —— 坐标系决策，有效。
+- `0001-坐标系统一为BD09.md` —— 坐标系决策，有效。**D3 已于 2026-11-12 修订**：起点转换改用已交叉验证的 `coordtransform_dart` 本地计算，不再依赖 AK。
 - `0002-路线数据源WebAPI实测.md` —— A 路（Web API）实测结论；D1 仍开放。
 - `0003-AndroidSDK检索组件静态探针.md` —— B 路（Android SDK）静态验证：制品、体积、字段覆盖；运行时探针已可编译但**一次检索都没发起**，D1 不因此关闭。
+- `0004-百度Flutter插件评估与原生薄通道.md` —— 官方 `flutter_baidu_mapapi_search` 丢 `direct_text`（安全红线），路线检索走自建薄通道；POI/Suggestion 有条件复用。**不关闭 D1**，全部是源码层结论。
+- `0005-本地持久化用sqflite.md` —— Drift → sqflite，只定选型不写代码。方案 7 处 Drift 提法已同步回写。
+
+## research/
+
+- `开源项目复用调研.md` —— 对百度系插件、Trufi Core、`map_launcher`、持久化与适老化 UI 包的源码级取证。**结论已吸收**：插件评估 → ADR 0004，持久化 → ADR 0005，坐标转换 → ADR 0001 事实 7，客户端版本门槛 → 方案 §3.7。文档本身保留作为证据索引，其中「未验证项」一节仍然有效。
 
 ## m0/
 
-- `纸面摘要样张.md` —— M0 任务 3 的朗读测试材料，由 `app/tool/render_paper_summary.dart` 从 `app/test/fixtures/` 的真实录制响应生成，不手抄。
+- `纸面摘要样张.md` —— M0 任务 3 的朗读测试材料，由 `app/tool/render_paper_summary.dart` 从 `app/test/fixtures/` 的真实录制响应生成，不手抄。含 3 张推荐方案 + 1 张换乘附加样张。
 - `客户端密钥与隐私审计.md` —— 服务端 AK/SK 未进 APK 的产物级证据；含申请 Android-端 AK 所需的包名与 SHA1，以及探针包不可分发的警告。
 - `真机导航测试清单.md` —— M0 任务 2/3/4 的真机执行清单：URI 参数组合、点击次数口径、关怀版是否支持调起。**所有实测列都是空的**，本机只完成静态准备。
 
@@ -31,9 +38,10 @@
 
 ## 配套代码与工具（在 docs 之外）
 
-- `app/lib/` —— 解析器、摘要模型与文案规则、URI 构造；`app/test/` 72 个用例。
+- `app/lib/` —— 解析器、摘要模型与文案规则、URI 构造；`app/test/` 76 个用例。
 - `app/tool/render_paper_summary.dart` —— 生成纸面样张；`app/tool/parse_sdk_dump.dart` —— 用同一套解析器消费 SDK 探针的 dump。
 - `tools/sdk-probe/` —— Search SDK 最小运行时探针（纯 Java，需 Android-端 AK 才能跑），步骤见其 `README.md`。
+- `tools/coord-check/` —— `coordtransform_dart` 与官方 geoconv 的逐点交叉验证（需服务端 AK，只在开发期跑），结论见其 `README.md`。**独立 pub 工程，依赖不进 `app/`**。
 - `tools/scan_apk_secrets.py` —— APK 密钥与私人数据扫描，只输出命中位置不回显值。
 
 ## 路径约定
