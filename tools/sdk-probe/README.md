@@ -14,8 +14,12 @@
 全是公共地标，不含私人位置。
 
 **静态与真机的边界**：本工程可以在开发机上编译（不需要 AK），但**任何检索调用、
-延迟数字、字段完整性结论都只能来自真机运行**。开发机上没有 Android-端 AK，
-也没有可替代真机的模拟器（检索结果依赖百度服务端鉴权）。
+延迟数字、字段完整性结论都只能来自真机运行**。开发机上没有可替代真机的模拟器
+（检索结果依赖百度服务端鉴权）。
+
+**当前进度（2026-11-12）**：Android-端 AK 已交付并注入，带 AK 的 APK 已构建、
+签名/权限/密钥审计全部通过（见 `docs/m0/客户端密钥与隐私审计.md` §7）。
+**仍未发起任何一次检索**，缺连接的真机。
 
 ## 它怎么复用现有代码
 
@@ -76,7 +80,7 @@ cd tools/sdk-probe
 | 包名 | `com.seniornav.seniornav`（与主 App 一致） |
 | minSdk / targetSdk | 24 / 36 |
 | 权限 | 只有 `INTERNET`、`ACCESS_NETWORK_STATE` |
-| `meta-data com.baidu.lbsapi.API_KEY` | `value=""` —— **未注入 AK 时是空串，不是占位假值** |
+| `meta-data com.baidu.lbsapi.API_KEY` | 未注入时 `value=""`（**不是占位假值**）；注入后为真实 AK，已核对与注入值逐字符相等 |
 | 签名 SHA-1 | `cd11338463a360589e9ab6468e8d8b8740e6b600`，与主 App 调试证书同一张 |
 | 打进包的 ABI | arm64-v8a、armeabi-v7a、x86、x86_64（各含 base / c++_shared / tiny_magic 三个 `.so`） |
 | `tools/scan_apk_secrets.py` | 服务端 AK/SK 与私人地点数据全部未命中 |
