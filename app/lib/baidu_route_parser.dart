@@ -121,31 +121,42 @@ RouteSummary _transitRoute(Map<String, dynamic> route, {required DateTime fetche
   var walkM = 0;
   var pendingWalkM = 0;
 
-  for (final segment in _transitSegments(route)) {
-    final detail = _asMap(_asMap(segment['vehicle_info'])?['detail']);
-    final transType = _asOptionalInt(segment['trans_type']);
+  for (final group in _transitGroups(route)) {
+    var rideTaken = false;
+    for (final segment in group) {
+      final detail = _asMap(_asMap(segment['vehicle_info'])?['detail']);
+      final transType = _asOptionalInt(segment['trans_type']);
 
-    if (detail != null) {
-      legs.add(TransitLeg(
-        lineName: _asOptionalString(detail['name']),
-        lineType: LineType.fromBaidu(_asOptionalInt(detail['type'])),
-        direction: _asOptionalString(detail['direct_text']),
-        boardStop: _asOptionalString(detail['on_station']),
-        alightStop: _asOptionalString(detail['off_station']),
-        stopCount: _asOptionalInt(detail['stop_num']),
-        firstTime: _asOptionalString(detail['first_time']),
-        lastTime: _asOptionalString(detail['last_time']),
-        boardWalkM: pendingWalkM,
-      ));
-      pendingWalkM = 0;
-      continue;
-    }
+      if (detail != null) {
+        // 同一组里的多条车辆段是「这一段可任选其一」的备选线路，不是连续乘车：
+        // 实测 metro_direct 第 5 条方案一组里有 4 条线路，距离之和 19081 米，
+        // 而整条 route.distance 只有 14114 米。逐条建 leg 会把换乘次数算成 3。
+        if (!rideTaken) {
+          legs.add(TransitLeg(
+            lineName: _asOptionalString(detail['name']),
+            lineType: LineType.fromBaidu(_asOptionalInt(detail['type'])),
+            direction: _asOptionalString(detail['direct_text']),
+            boardStop: _asOptionalString(detail['on_station']),
+            alightStop: _asOptionalString(detail['off_station']),
+            stopCount: _asOptionalInt(detail['stop_num']),
+            firstTime: _asOptionalString(detail['first_time']),
+            lastTime: _asOptionalString(detail['last_time']),
+            boardWalkM: pendingWalkM,
+          ));
+          pendingWalkM = 0;
+          rideTaken = true;
+        }
+        continue;
+      }
 
-    // trans_type == 3 是同站换乘标记，距离恒为 1 米；计入会让步行数虚高。
-    if (transType == 0) {
-      final distance = _asInt(segment['distance'], context: '步行段 distance');
-      walkM += distance;
-      pendingWalkM += distance;
+      // trans_type == 3 是同站换乘标记，距离恒为 1 米；计入会让步行数虚高。
+      // trans_type == 4 是换乘步行（实测 instructions 为「步行228米」），
+      // 漏掉它会让换乘方案的步行距离和「步行到上车站」文案一起缺失。
+      if (transType == 0 || transType == 4) {
+        final distance = _asInt(segment['distance'], context: '步行段 distance');
+        walkM += distance;
+        pendingWalkM += distance;
+      }
     }
   }
 
@@ -160,22 +171,26 @@ RouteSummary _transitRoute(Map<String, dynamic> route, {required DateTime fetche
   );
 }
 
-/// `routes[].steps` 是**列表的列表**：外层是步骤，内层才是分段对象。
+/// `routes[].steps` 是**列表的列表**：外层是步骤组，内层才是分段对象。
 ///
 /// §4.3 把它写成对象数组，直接对元素取字段会抛类型错误（ADR 0002 §2.3）。
 /// 同时容忍扁平形状，以免百度哪天改回去。
-Iterable<Map<String, dynamic>> _transitSegments(Map<String, dynamic> route) sync* {
+///
+/// 必须保留分组边界：一组里的多条车辆段是备选线路（见 [_transitRoute]），
+/// 拍平之后就分不清「换乘」和「同段任选」了。
+Iterable<List<Map<String, dynamic>>> _transitGroups(Map<String, dynamic> route) sync* {
   final steps = route['steps'];
   if (steps is! List) {
     throw const FormatException('steps 缺失或不是数组');
   }
   for (final group in steps) {
     if (group is Map<String, dynamic>) {
-      yield group;
+      yield [group];
     } else if (group is List) {
-      for (final segment in group) {
-        if (segment is Map<String, dynamic>) yield segment;
-      }
+      yield [
+        for (final segment in group)
+          if (segment is Map<String, dynamic>) segment,
+      ];
     }
   }
 }

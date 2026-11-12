@@ -52,12 +52,37 @@ void main() {
       expect(leg.direction, isNot(leg.alightStop));
     });
 
-    test('步行段只统计 trans_type == 0，同站换乘标记不计入', () {
+    test('步行段统计 trans_type 0 与 4，同站换乘标记不计入', () {
       final routes = parsed(parseTransit(fixture('bus_transfer_transit'), fetchedAt: recordedAt));
-      // r0 = 755 + 862 里的 107，其中 trans_type == 3 的换乘标记距离是 1 米。
+      // r0 = 755 + 107，其中 trans_type == 3 的换乘标记距离是 1 米。
       expect(routes[0].walkM, 862);
       expect(routes[0].legs, hasLength(2));
       expect(routes[0].transfers, 1);
+    });
+
+    test('换乘步行段 trans_type == 4 计入 walkM 与下一段 boardWalkM', () {
+      // 回归：旧实现只认 trans_type == 0，把 228/338 米的换乘步行整段丢掉，
+      // 摘要里「步行到上车站」那一行随之消失。fixture 里该段 instructions
+      // 就是「步行228米」，确属步行而非标记。
+      final routes = parsed(parseTransit(fixture('metro_direct_transit'), fetchedAt: recordedAt));
+
+      expect(routes[3].walkM, 2213 + 228 + 82);
+      expect(routes[3].legs[1].boardWalkM, 228);
+      expect(routes[4].walkM, 2213 + 338 + 386);
+      expect(routes[4].legs[1].boardWalkM, 338);
+    });
+
+    test('同组多条车辆段是备选线路，只算一段乘车', () {
+      // 回归：metro_direct 第 5 条方案的一组里有 4路/T38路/T37路/T12路 四条
+      // 备选线路，距离之和 19081 米 > 整条 route.distance 14114 米，证明是
+      // 「同段任选」而非连续乘车。旧实现建 4 个 leg，把 1 次换乘算成 3 次。
+      final routes = parsed(parseTransit(fixture('metro_direct_transit'), fetchedAt: recordedAt));
+      final r = routes[4];
+
+      expect(r.legs, hasLength(2));
+      expect(r.transfers, 1);
+      expect(r.legs[0].lineName, '4路');
+      expect(r.legs[1].lineName, '省二院健康专线');
     });
 
     test('换乘线路的每一段都保留各自的站数与首末班', () {
@@ -217,6 +242,63 @@ void main() {
 
     test('没有路线时抛错，由调用方先判空', () {
       expect(() => selectRoute(const []), throwsStateError);
+    });
+
+    // 绕路保护：少换乘不能以明显绕路为代价。阈值为 M0 暂定（慢 10 分钟 / 远 1 倍）。
+    RouteSummary plan({
+      required int seconds,
+      required int meters,
+      int transfers = 0,
+    }) =>
+        RouteSummary(
+          mode: RouteMode.transit,
+          durationSec: seconds,
+          distanceM: meters,
+          fetchedAt: recordedAt,
+          legs: List.generate(transfers + 1, (_) => const TransitLeg()),
+        );
+
+    test('0 换乘但比最快方案慢 11 分钟 → 选更快的 1 换乘', () {
+      final best = selectRoute([
+        plan(seconds: 40 * 60, meters: 10000, transfers: 0),
+        plan(seconds: 29 * 60, meters: 10000, transfers: 1),
+      ]);
+      expect(best.transfers, 1);
+      expect(best.durationSec, 29 * 60);
+    });
+
+    test('0 换乘只慢 9 分钟 → 仍选少换乘', () {
+      final best = selectRoute([
+        plan(seconds: 38 * 60, meters: 10000, transfers: 0),
+        plan(seconds: 29 * 60, meters: 10000, transfers: 1),
+      ]);
+      expect(best.transfers, 0);
+    });
+
+    test('正好慢 10 分钟在容忍边界内 → 仍选少换乘', () {
+      final best = selectRoute([
+        plan(seconds: 39 * 60, meters: 10000, transfers: 0),
+        plan(seconds: 29 * 60, meters: 10000, transfers: 1),
+      ]);
+      expect(best.transfers, 0);
+    });
+
+    test('时长相同但距离 2.5 倍 → 选不绕路的 1 换乘', () {
+      final best = selectRoute([
+        plan(seconds: 30 * 60, meters: 25000, transfers: 0),
+        plan(seconds: 30 * 60, meters: 10000, transfers: 1),
+      ]);
+      expect(best.transfers, 1);
+      expect(best.distanceM, 10000);
+    });
+
+    test('两个过滤条件互斥时退回时长过滤，不抛异常', () {
+      // 最快方案绕远、最短方案超时：交集为空，必须仍有结果。
+      final best = selectRoute([
+        plan(seconds: 30 * 60, meters: 30000, transfers: 0),
+        plan(seconds: 50 * 60, meters: 10000, transfers: 1),
+      ]);
+      expect(best.durationSec, 30 * 60);
     });
   });
 

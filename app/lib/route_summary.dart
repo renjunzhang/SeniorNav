@@ -6,6 +6,8 @@
 /// 本文件不需要改动。
 library;
 
+import 'dart:math';
+
 /// 出行方式。
 enum RouteMode { transit, walking }
 
@@ -87,8 +89,8 @@ class RouteSummary {
   final int durationSec;
   final int distanceM;
 
-  /// 各步行段距离之和。只统计 `trans_type == 0` 的段；`trans_type == 3`
-  /// 是同站换乘标记，距离恒为 1 米，计入会让步行数虚高。
+  /// 各步行段距离之和。统计 `trans_type == 0`（普通步行）与 `== 4`（换乘步行）；
+  /// `trans_type == 3` 是同站换乘标记，距离恒为 1 米，计入会让步行数虚高。
   final int walkM;
 
   final List<TransitLeg> legs;
@@ -308,19 +310,33 @@ ModeAdvice recommendMode({RouteSummary? transit, required RouteSummary walking})
 /// 0 换乘的轨道交通 2 号线被排在第 5 位（87.6 分钟/1 换乘的方案反而在第 1 位），
 /// 按本规则重排才能把它选出来（ADR 0002 §2.7）。
 ///
-/// §4.4 还写了「换乘多、步行远的方案直接淘汰」，但没有给阈值，
-/// 因此这里只做排序不做淘汰；阈值待定，见 ADR 0002 §4。
+/// **绕路保护**：少换乘不能以明显绕路为代价。先剔掉「比最快方案慢 10 分钟以上」
+/// 或「比最短方案远 1 倍以上」的候选，再在剩下的里面比换乘。否则一条 0 换乘但
+/// 绕出去几十分钟的方案会赢过一条快得多的 1 换乘方案，老人白白多坐半小时。
+/// 10 分钟与 2 倍是 M0 暂定阈值，待真机与老人试用后校准（ADR 0002 §4）。
+///
+/// 时长过滤永远非空（最快方案自身满足）；若叠加距离过滤后为空，退回只按时长过滤，
+/// 保证任何输入都有结果，不抛异常。
 RouteSummary selectRoute(Iterable<RouteSummary> routes) {
   final list = routes.toList();
   if (list.isEmpty) {
     throw StateError('没有可选路线；调用方应先判断 routes 是否为空');
   }
-  list.sort((a, b) {
+
+  final fastest = list.map((r) => r.durationSec).reduce(min);
+  final shortest = list.map((r) => r.distanceM).reduce(min);
+  bool withinTime(RouteSummary r) => r.durationSec <= fastest + 10 * 60;
+  bool withinDistance(RouteSummary r) => r.distanceM <= shortest * 2;
+
+  var pool = list.where((r) => withinTime(r) && withinDistance(r)).toList();
+  if (pool.isEmpty) pool = list.where(withinTime).toList();
+
+  pool.sort((a, b) {
     final byTransfers = a.transfers.compareTo(b.transfers);
     if (byTransfers != 0) return byTransfers;
     final byWalk = a.walkM.compareTo(b.walkM);
     if (byWalk != 0) return byWalk;
     return a.durationSec.compareTo(b.durationSec);
   });
-  return list.first;
+  return pool.first;
 }
