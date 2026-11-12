@@ -59,6 +59,11 @@ tools/sdk-probe/**/build/
 tools/sdk-probe/local.properties
 tools/sdk-probe/ak.properties
 
+# ---- 坐标交叉验证（tools/coord-check）----
+tools/coord-check/.dart_tool/
+tools/coord-check/points.json
+tools/coord-check/dart_out.json
+
 # ---- IDE / 系统 ----
 .idea/
 *.iml

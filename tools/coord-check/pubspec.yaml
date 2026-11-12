@@ -1,0 +1,10 @@
+name: coord_check
+description: 开发期交叉验证：coordtransform_dart 与百度官方 geoconv 逐点比对。不属于客户端代码。
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  coordtransform_dart: ^1.0.4
