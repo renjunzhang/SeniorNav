@@ -53,6 +53,12 @@ app/android/app/release/
 *.aab
 *.ipa
 
+# ---- SDK 探针（tools/sdk-probe）构建产物与本机配置 ----
+tools/sdk-probe/.gradle/
+tools/sdk-probe/**/build/
+tools/sdk-probe/local.properties
+tools/sdk-probe/ak.properties
+
 # ---- IDE / 系统 ----
 .idea/
 *.iml
