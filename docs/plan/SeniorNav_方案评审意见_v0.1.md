@@ -151,13 +151,13 @@ V2 验收要求"家属收到可见通知并可确认"，架构却是"家属手�
 
 | 位置 | 问题 | 建议 |
 |---|---|---|
-| [main.dart:80](app/lib/main.dart#L80) | 网页回退固定用 `webFallback(home)`。测其他地点时若百度未安装，会回退到"某小区"，测错对象 | `_launch` 接收 `Destination`，按本次目标回退 |
-| [main.dart:88-95](app/lib/main.dart#L88-L95) | `await launchUrl` 后直接 `setState`，无 `mounted` 检查；页面销毁时会抛异常 | 加 `if (!mounted) return;` |
+| [main.dart:80](../../app/lib/main.dart#L80) | 网页回退固定用 `webFallback(home)`。测其他地点时若百度未安装，会回退到"某小区"，测错对象 | `_launch` 接收 `Destination`，按本次目标回退 |
+| [main.dart:88-95](../../app/lib/main.dart#L88-L95) | `await launchUrl` 后直接 `setState`，无 `mounted` 检查；页面销毁时会抛异常 | 加 `if (!mounted) return;` |
 | 同上 | 调起抛异常时只显示错误，不提供网页回退；与方案"不出现无响应/误导"不一致 | 异常时展示"改用网页打开"按钮 |
-| [baidu_uri.dart:44-48](app/lib/baidu_uri.dart#L44-L48) | `webFallback` 是**搜索页**（`/search/名称`），不是路线页，且丢掉 `mode`/`uid`/`region` | 回退到路线 URL（需核验百度 Web 路线参数），或至少带城市 |
-| [baidu_uri.dart:61-74](app/lib/baidu_uri.dart#L61-L74) | `origin` 可空，主按钮省略；官方文档 `origin` 必选 | 增加省略/`我的位置`/显式坐标三种变体并记录结果 |
-| [main.dart:145-148](app/lib/main.dart#L145-L148) | 注释断言"walknavi 可直接开始语音导航"，尚未真机确认 | 改成"进入步行导航界面，是否自动播报待真机确认" |
-| [baidu_uri.dart:6-9](app/lib/baidu_uri.dart#L6-L9) | `andr.seniornav.app` 的 app 段是 `app`，语义弱；文档规则与示例前缀不一致 | 用 `andr.<公司>.<应用名>`，如 `andr.seniornav.mobile`，并实测 |
+| [baidu_uri.dart:44-48](../../app/lib/baidu_uri.dart#L44-L48) | `webFallback` 是**搜索页**（`/search/名称`），不是路线页，且丢掉 `mode`/`uid`/`region` | 回退到路线 URL（需核验百度 Web 路线参数），或至少带城市 |
+| [baidu_uri.dart:61-74](../../app/lib/baidu_uri.dart#L61-L74) | `origin` 可空，主按钮省略；官方文档 `origin` 必选 | 增加省略/`我的位置`/显式坐标三种变体并记录结果 |
+| [main.dart:145-148](../../app/lib/main.dart#L145-L148) | 注释断言"walknavi 可直接开始语音导航"，尚未真机确认 | 改成"进入步行导航界面，是否自动播报待真机确认" |
+| [baidu_uri.dart:6-9](../../app/lib/baidu_uri.dart#L6-L9) | `andr.seniornav.app` 的 app 段是 `app`，语义弱；文档规则与示例前缀不一致 | 用 `andr.<公司>.<应用名>`，如 `andr.seniornav.mobile`，并实测 |
 | 全局 | 没有 `origin=我的位置`、GPS 起点 + BD-09 终点的偏移测试 | M0 必测（见 §5 第 8 项） |
 | 全局 | UI 不记录机型/Android/百度版本/时间，录屏之外无可追溯记录 | 加"复制环境信息"按钮，或直接写 `docs/m0/` 记录 |
 | 全局 | `docs/` 为空；`app/README.md` 仍是 Flutter 模板 | 补 `docs/adr/0001-*.md` 与 `docs/m0/2026-11-11-真机记录.md` |
