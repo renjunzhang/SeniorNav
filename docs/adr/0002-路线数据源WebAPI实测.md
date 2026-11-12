@@ -230,7 +230,12 @@ fixture `walk_short_transit.json` 就是为这个分支录的。
 ## 4. 仍未验证
 
 - **当日总配额**：控制台会话过期，只拿到并发数 3，日调用量上限未知。
-- **Android SDK（B 路）**：完全没测。D1 依赖它，见 §10 M0 任务 2。
+- **Android SDK（B 路）**：静态探针已完成，见 [ADR 0003](0003-AndroidSDK检索组件静态探针.md)；运行时取值仍未验证，D1 不关闭。前置条件（2026-11-12）：
+  - ~~SDK 不在 Maven Central~~ **此条已作废**：当时查的坐标 `com/baidu/lbsapi/BaiduLBS-Android` 写错了 group。正确坐标是 `com.baidu.lbsyun:BaiduMapSDK_Search`，Maven Central 可直接依赖，无需手动下载。
+  - 官方文档站 `lbsyun.baidu.com/docs/...` 是 JS 壳，直接抓取会 302 到 `lbs.baidu.com` 首页；用真浏览器可正常渲染，ADR 0003 的文档引文即由此取得。
+  - 需要**另一个 AK**：Android 端 AK，绑定包名 + 签名 SHA1。当前的服务端 AK 不能用于 SDK，这一步只能由账号所有者在控制台创建。包名与 SHA1 已提取，见 [M0 审计记录](../m0/客户端密钥与隐私审计.md)。
+  - 开发机 `/dev/kvm` 可用，但 `emulator` 组件与系统镜像未安装、无 AVD；且模拟器无法替代真机——M0 任务 2/3/4 都依赖真实安装的百度地图客户端。
+  - 不需要设备也不需要 AK 的部分（制品体积、`.so` 架构清单、是否需要 MapView、字段表面覆盖）已在 ADR 0003 完成；字段运行时取值、延迟、能否直接起步行导航，必须有 Android AK 且最终要上真机。
 - **`destination_uid` 的真实作用**：本 OD 无差异，需换一个终点入口复杂的 POI（如医院）复测。
 - **跨城 / 同名地点**：§6.3 的「公交跨区」场景未测。
 - **`tactics_incity=1`（少换乘）与 `0`（推荐）的区别**：本 OD 上首条方案相同，只是方案总数 4 vs 5，
