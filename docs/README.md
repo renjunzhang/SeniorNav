@@ -19,14 +19,22 @@
 
 - `0001-坐标系统一为BD09.md` —— 坐标系决策，有效。
 - `0002-路线数据源WebAPI实测.md` —— A 路（Web API）实测结论；D1 仍开放。
-- `0003-AndroidSDK检索组件静态探针.md` —— B 路（Android SDK）静态验证：制品、体积、字段覆盖。**运行时未验证**，D1 不因此关闭。
+- `0003-AndroidSDK检索组件静态探针.md` —— B 路（Android SDK）静态验证：制品、体积、字段覆盖；运行时探针已可编译但**一次检索都没发起**，D1 不因此关闭。
 
 ## m0/
 
 - `纸面摘要样张.md` —— M0 任务 3 的朗读测试材料，由 `app/tool/render_paper_summary.dart` 从 `app/test/fixtures/` 的真实录制响应生成，不手抄。
 - `客户端密钥与隐私审计.md` —— 服务端 AK/SK 未进 APK 的产物级证据；含申请 Android-端 AK 所需的包名与 SHA1，以及探针包不可分发的警告。
+- `真机导航测试清单.md` —— M0 任务 2/3/4 的真机执行清单：URI 参数组合、点击次数口径、关怀版是否支持调起。**所有实测列都是空的**，本机只完成静态准备。
 
 真机测试记录也放这里，按 `GIT_COMMIT_RULES` §3.7 先删设备序列号、手机号与精确家庭位置。
+
+## 配套代码与工具（在 docs 之外）
+
+- `app/lib/` —— 解析器、摘要模型与文案规则、URI 构造；`app/test/` 72 个用例。
+- `app/tool/render_paper_summary.dart` —— 生成纸面样张；`app/tool/parse_sdk_dump.dart` —— 用同一套解析器消费 SDK 探针的 dump。
+- `tools/sdk-probe/` —— Search SDK 最小运行时探针（纯 Java，需 Android-端 AK 才能跑），步骤见其 `README.md`。
+- `tools/scan_apk_secrets.py` —— APK 密钥与私人数据扫描，只输出命中位置不回显值。
 
 ## 路径约定
 

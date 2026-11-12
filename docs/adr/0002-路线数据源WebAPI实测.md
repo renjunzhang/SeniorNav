@@ -209,6 +209,35 @@ fixture `walk_short_transit.json` 就是为这个分支录的。
 | `route` 其他字段 | `price`、`price_detail`、`arrive_time`；`result` 层还有 `taxi`、`total` | §4.4 的 RouteSummary 未包含。票价对老人有价值，建议评估是否加入 |
 | 命名风格 | walking 的 `route` 用 camelCase（`originLocation`/`destinationLocation`），transit 用 snake_case | 解析层不能复用同一套字段名 |
 
+### 2.11 换乘步行与「同段备选线路」：两处会让摘要少算步行、多算换乘
+
+修解析器时在同一份 fixture（`app/test/fixtures/metro_direct_transit.json`）里发现两个此前没记录的结构事实。
+
+**（1）`trans_type == 4` 是换乘步行，不是标记。** 第 4/5 条方案的两段乘车之间夹着
+`instructions` 为「步行228米」/「步行338米」的段，`trans_type` 是 4。
+旧实现只累加 `trans_type == 0`，把这两段整段丢掉：
+
+| 方案 | 正确 walkM | 旧实现 walkM | 丢失 |
+|---|---|---|---|
+| `routes[3]` | 2213 + 228 + 82 = 2523 | 2295 | 228 米 |
+| `routes[4]` | 2213 + 338 + 386 = 2937 | 2599 | 338 米 |
+
+后果不只是数字偏小：`boardWalkM` 归零会让摘要里「步行约 230 米 → 上车站」**整行消失**，
+老人不知道换乘还要走一段。而 §4.4 选路的第二关键字就是步行距离，少算 338 米足以改变排序。
+`trans_type == 3` 仍是同站换乘标记（distance 恒为 1 米），继续不计入。
+
+**（2）同一组里的多条车辆段是「这一段可任选其一」的备选线路。** `routes[4]` 的一组里并列
+4路 / T38路 / T37路 / T12路 四条 `detail`，四段 distance 之和 **19081 米 > 整条 `route.distance` 14114 米**
+——连续乘车不可能超过总里程，因此它们是同段备选。旧实现给每条 `detail` 建一个 leg，
+把 1 次换乘算成 3 次，摘要会印「要换 3 次车」，实际只需换 1 次。
+
+实现上必须**保留组边界**（`steps` 的外层列表），每组只取第一条车辆段；
+把 `steps` 拍平成一个段列表就再也分不出「备选」与「换乘」。
+
+两条都已写成回归测试（`app/test/baidu_route_parser_test.dart`）。修复后重跑
+`app/tool/render_paper_summary.dart`，输出与 `docs/m0/纸面摘要样张.md` 逐字一致
+——样张选中的三条方案都不含这两种形状，所以朗读材料不需要重印。
+
 ---
 
 ## 3. 决策
@@ -223,14 +252,16 @@ fixture `walk_short_transit.json` 就是为这个分支录的。
 | A6 | 无公交方案的判据是 `status == 0 && routes.isEmpty`，与请求失败分开处理 | §2.8 |
 | A7 | 摘要生成必须校验 `first_time`/`last_time`，非运营时段走降级文案 | §2.9 |
 | A8 | 请求一律串行；超时后不自动重发。若走 A 路，代理层需限流并排队 | §2.2 |
-| A9 | D1 暂不关闭：还需按 §4.2 做 Android SDK spike（字段、延迟、APK 增量、是否需要地图视图） | §4.2 的决策规则要求两路都测 |
+| A9 | D1 暂不关闭：B 路静态探针已完成（ADR 0003），运行时探针已可编译，但**字段取值与延迟一个都没测** | §4.2 的决策规则要求两路都测 |
+| A10 | `walkM` / `boardWalkM` 统计 `trans_type` 0 **与 4**；同一组里的多条车辆段只取第一条 | §2.11 |
+| A11 | 选路在「换乘→步行→时长」之前先过滤明显绕路：时长 ≤ 最快 + 10 分钟且里程 ≤ 最短 × 2；过滤后为空则只按时长过滤，绝不抛错 | §4.4 的排序遇到「0 换乘但绕远」会选错；阈值是 M0 暂定值，待 §6.3 的 12 类场景校验 |
 
 ---
 
 ## 4. 仍未验证
 
 - **当日总配额**：控制台会话过期，只拿到并发数 3，日调用量上限未知。
-- **Android SDK（B 路）**：静态探针已完成，见 [ADR 0003](0003-AndroidSDK检索组件静态探针.md)；运行时取值仍未验证，D1 不关闭。前置条件（2026-11-12）：
+- **Android SDK（B 路）**：静态探针已完成，见 [ADR 0003](0003-AndroidSDK检索组件静态探针.md)；运行时探针工程已可编译（`tools/sdk-probe/`），但**检索一次都没发起**，D1 不关闭。前置条件（2026-11-12）：
   - ~~SDK 不在 Maven Central~~ **此条已作废**：当时查的坐标 `com/baidu/lbsapi/BaiduLBS-Android` 写错了 group。正确坐标是 `com.baidu.lbsyun:BaiduMapSDK_Search`，Maven Central 可直接依赖，无需手动下载。
   - 官方文档站 `lbsyun.baidu.com/docs/...` 是 JS 壳，直接抓取会 302 到 `lbs.baidu.com` 首页；用真浏览器可正常渲染，ADR 0003 的文档引文即由此取得。
   - 需要**另一个 AK**：Android 端 AK，绑定包名 + 签名 SHA1。当前的服务端 AK 不能用于 SDK，这一步只能由账号所有者在控制台创建。包名与 SHA1 已提取，见 [M0 审计记录](../m0/客户端密钥与隐私审计.md)。
