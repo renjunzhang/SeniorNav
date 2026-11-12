@@ -17,6 +17,20 @@ List<RouteSummary> parsed(RouteParseResult result) => (result as RouteParsed).ro
 RouteSummary bestTransit(String name) =>
     selectRoute(parsed(parseTransit(fixture(name), fetchedAt: recordedAt)));
 
+/// 文案里的步行短语。用来把渲染结果还原成米数，校验步行总量没有漏段。
+final RegExp _walkPhrase = RegExp(r'约 ([\d.]+) (米|公里)');
+
+int renderedWalkM(SummaryText text) {
+  var total = 0;
+  for (final step in text.steps) {
+    for (final m in _walkPhrase.allMatches(step)) {
+      final value = double.parse(m.group(1)!);
+      total += (m.group(2) == '公里' ? value * 1000 : value).round();
+    }
+  }
+  return total;
+}
+
 void main() {
   group('数字文案', () {
     test('米数取整到 10 米、公里取整到 0.1 公里', () {
@@ -100,6 +114,58 @@ void main() {
       final late = DateTime(2026, 11, 12, 23, 50);
       final text = renderSummary(bestTransit('metro_direct_transit'), now: late);
       expect(text.warnings, ['轨道交通1号线 末班 23:35，现在可能已经收车']);
+    });
+  });
+
+  group('换乘步行必须可见（§3.3 公交摘要含「换乘」与步行距离）', () {
+    test('换乘步行并入换乘行，不单独占一行', () {
+      // 实测 metro_direct 方案 2 总步行 941 米，其中 495 米是换乘步行。
+      // 修复前文案只印 60 + 390 米，老人看不到下车后还要走半公里。
+      final routes = parsed(parseTransit(fixture('metro_direct_transit'), fetchedAt: recordedAt));
+      final text = renderSummary(routes[1], now: recordedAt);
+
+      expect(routes[1].walkM, 941);
+      expect(routes[1].legs.map((l) => l.boardWalkM), [60, 495]);
+      expect(text.steps, [
+        '① 步行约 60 米 → 合肥南站(C口)',
+        '② 坐 轨道交通5号线（开往 汲桥路方向），5 站，中国科大东区站下车',
+        '③ 步行约 500 米，换 省二院健康专线（开往 仁济医院方向），5 站，站前广场站下车',
+        '④ 步行约 390 米到终点',
+      ]);
+      expect(text.lineCount, 6);
+    });
+
+    test('换乘步行不重复计入「到终点」', () {
+      final routes = parsed(parseTransit(fixture('metro_direct_transit'), fetchedAt: recordedAt));
+      final text = renderSummary(routes[1], now: recordedAt);
+      // 941 − 60 − 495 = 386，取整 390；若换乘步行没被扣掉会印成 880 米。
+      expect(text.steps.last, '④ 步行约 390 米到终点');
+    });
+
+    test('同站换乘（boardWalkM 为 0）不写「步行约 0 米」', () {
+      final routes = parsed(parseTransit(fixture('bus_transfer_transit'), fetchedAt: recordedAt));
+      final text = renderSummary(routes[0], now: recordedAt);
+
+      expect(routes[0].legs[1].boardWalkM, 0);
+      expect(text.steps[2], startsWith('③ 换 320路'));
+      expect(text.steps.join(), isNot(contains('约 0 米')));
+    });
+
+    test('未截断方案：文案里的步行米数之和与 walkM 相符', () {
+      for (final name in ['metro_direct_transit', 'bus_transfer_transit']) {
+        final routes = parsed(parseTransit(fixture(name), fetchedAt: recordedAt));
+        for (final (i, r) in routes.indexed) {
+          final text = renderSummary(r, now: recordedAt);
+          // §3.3 允许超过 4 段时主动丢弃细节，这类方案不参与守恒校验。
+          if (text.steps.last.contains('之后的换乘')) continue;
+          final phrases = text.steps.expand(_walkPhrase.allMatches).length;
+          expect(
+            (renderedWalkM(text) - r.walkM).abs(),
+            lessThanOrEqualTo(60 * phrases),
+            reason: '$name routes[$i] walkM=${r.walkM}，文案=${text.steps}',
+          );
+        }
+      }
     });
   });
 

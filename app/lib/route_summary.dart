@@ -210,7 +210,12 @@ SummaryText _renderTransit(RouteSummary s, {required DateTime now}) {
   }
 
   for (var i = 0; i < s.legs.length; i++) {
-    lines.add(_renderLeg(s.legs[i], isFirst: i == 0));
+    final leg = s.legs[i];
+    final ride = _renderLeg(leg, isFirst: i == 0);
+    // 换乘步行并进换乘行，不单独占一行：4 行预算下单独一行会把「换哪路车」挤掉。
+    lines.add(i > 0 && leg.boardWalkM > 0
+        ? '步行${formatDistance(leg.boardWalkM)}，$ride'
+        : ride);
   }
 
   final trailingWalk = s.walkM - s.legs.fold<int>(0, (sum, l) => sum + l.boardWalkM);

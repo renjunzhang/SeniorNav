@@ -45,16 +45,21 @@ const List<({String label, String origin, String destination, String id})> cases
 Map<String, dynamic> readFixture(String name) =>
     jsonDecode(File('test/fixtures/$name.json').readAsStringSync()) as Map<String, dynamic>;
 
-RouteSummary? firstTransit(String id) {
+List<RouteSummary>? transitRoutes(String id) {
   final result = parseTransit(readFixture('${id}_transit'), fetchedAt: recordedAt);
   return switch (result) {
-    RouteParsed(:final routes) => selectRoute(routes),
+    RouteParsed(:final routes) => routes,
     // status == 0 且 routes 为空是「这段路没有公交方案」，不是失败（ADR 0002 A6）。
     RouteEmpty() => null,
     RouteRejected(:final status, :final message) =>
       throw StateError('$id transit 被拒：status=$status $message'),
     RouteMalformed(:final detail) => throw StateError('$id transit 结构异常：$detail'),
   };
+}
+
+RouteSummary? firstTransit(String id) {
+  final routes = transitRoutes(id);
+  return routes == null ? null : selectRoute(routes);
 }
 
 RouteSummary firstWalking(String id) {
@@ -124,4 +129,21 @@ void main(List<String> args) {
       ..writeln('查询时间 02:00｜路线以百度地图为准｜数据来源：百度地图')
       ..writeln();
   }
+
+  // 附加样张：上面三条推荐方案都是 0 换乘，朗读测试里「换几次车」「下车走多远」
+  // 两问因此测不到。固定取 metro_direct 第 2 条（1 次换乘 + 495 米换乘步行），
+  // 专测换乘文案，不是推荐结果。
+  final transfer = transitRoutes('metro_direct')![1];
+  stdout
+    ..writeln('=' * 46)
+    ..writeln('样张 4｜去火车站（换乘方案，非推荐）')
+    ..writeln('合肥南站-地铁站 → 合肥火车站')
+    ..writeln()
+    ..writeln(renderBlock(
+      '去火车站 · 坐公交（1 次换乘）',
+      renderSummary(transfer, now: recordedAt),
+    ))
+    ..writeln('-' * 46)
+    ..writeln('查询时间 02:00｜路线以百度地图为准｜数据来源：百度地图')
+    ..writeln();
 }
