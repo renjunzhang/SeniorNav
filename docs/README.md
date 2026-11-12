@@ -44,6 +44,102 @@
 - `tools/coord-check/` —— `coordtransform_dart` 与官方 geoconv 的逐点交叉验证（需服务端 AK，只在开发期跑），结论见其 `README.md`。**独立 pub 工程，依赖不进 `app/`**。
 - `tools/scan_apk_secrets.py` —— APK 密钥与私人数据扫描，只输出命中位置不回显值。
 
+## 开发环境（Linux / Windows 双平台）
+
+Linux 与 Windows 都能开发，**Windows 侧统一用 Git Bash**（Git for Windows 自带 bash 与
+GNU coreutils）。钩子与 `tools/build_probe.sh` 是 bash 脚本，不为 Windows 另写一套
+PowerShell 版本——那是把安全关键逻辑复制两份，两边迟早漂移。
+
+### 1. 装什么（版本要对上）
+
+| 工具 | 版本 | 说明 |
+|---|---|---|
+| Git | 最新；Windows 装 **Git for Windows** | 自带 bash 与 GNU coreutils，钩子与 `tools/build_probe.sh` 全靠它 |
+| Flutter SDK | **3.47.9 stable** | Dart 约束 `^3.13.7`，SDK 自带 Dart，不必另装 |
+| Android SDK | Platform 36 + **Build-Tools 36.0.0** + Platform-Tools | 走 Android Studio 的 SDK Manager |
+| JDK | **17** | 探针 `sourceCompatibility = 17`；Android Studio 自带的 JBR 够用 |
+| Python | 3.x | Windows 安装时勾 Add to PATH |
+
+`gitleaks` 可选，装了钩子会多跑一道。**不需要 pip install**——`tools/` 下的脚本只用标准库。
+
+路径与环境变量：
+
+| 项 | Linux | Windows（Git Bash） |
+|---|---|---|
+| Flutter / Dart | `<flutter>/bin` 加进 PATH | 同左，路径写 `/c/...` 形式 |
+| Android SDK | `ANDROID_HOME` 环境变量 | 同左，通常在 `/c/Users/<你>/AppData/Local/Android/Sdk` |
+| Python | `python3` | 通常是 `python` 或 `py` |
+| Gradle | 用 Flutter 缓存的 `~/.gradle/wrapper/dists/...` | `"$USERPROFILE"/.gradle/...`，可执行文件是 `gradle.bat` |
+| 换行 | LF | **必须 LF**，已由 `.gitattributes` 钉死 |
+
+### 2. 克隆前
+
+```bash
+git config --global core.autocrlf false
+```
+
+`.gitattributes` 已在仓库侧钉死 LF，这条是双保险。CRLF 会让 bash 脚本的 shebang
+行尾多出 `\r`，钩子**静默失效**——不报错，看起来像"检查通过了"。
+
+### 3. 克隆后必做（每个克隆都要做一次）
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`core.hooksPath` 是本地配置，不随仓库传播。**这条不做，密钥防线不生效。**
+
+再手工搬三个文件，它们都在 gitignore 里，不会跟过来：
+
+| 文件 | 内容 | 怎么办 |
+|---|---|---|
+| `.env.local` | 服务端 AK/SK + Android-端 AK | 手工新建，三行 `KEY=值` |
+| `.git/privacy-terms` | 真实小区名、完整坐标、POI UID | 手工新建，一行一个词 |
+| `tools/.env.places` | 真实地点 JSON | 用 `tools/write_places_env.py` 重新生成 |
+
+`app/android/local.properties` 不用管，Flutter 自动生成。
+
+**这三个用 U 盘或加密渠道传，不要走聊天工具。** 尤其 `privacy-terms`，里面是真实住址；
+它只存在 `.git/` 内，永不提交。
+
+### 4. 拷调试 keystore（换机最容易漏的一步）
+
+```
+Linux:   ~/.android/debug.keystore
+Windows: C:\Users\<你>\.android\debug.keystore
+```
+
+**直接拷过去，不要让它重新生成。** 百度 Android-端 AK 绑的是**包名 + SHA1**，
+重新生成就是另一张证书，检索会返回鉴权错误而不是路线，且报错不会提示是签名问题。
+
+拷完用产物验一次，SHA-1 必须是 `cd11338463a360589e9ab6468e8d8b8740e6b600`：
+
+```bash
+"$ANDROID_HOME"/build-tools/36.0.0/apksigner verify --print-certs \
+  tools/sdk-probe/probe/build/outputs/apk/debug/probe-debug.apk
+```
+
+对不上就是 keystore 没拷对。若决定改用新证书，必须回百度控制台补登记新 SHA1，
+当前登记值见 `docs/m0/客户端密钥与隐私审计.md` §6。
+
+### 5. 验证
+
+```bash
+flutter doctor -v
+cd app && flutter test              # 必须 76 个全过
+bash -n ../.githooks/pre-commit     # 语法检查，确认 CRLF 没弄坏脚本
+```
+
+**只验语法不够**：再故意提交一个含假密钥的文件，确认钩子**真的拦下来**，
+然后 `git reset` 撤销。钩子失效是静默的，必须主动验一次。
+
+构建 SDK 探针（Windows 记得是 `gradle.bat`）：
+
+```bash
+cd tools/sdk-probe
+"$USERPROFILE"/.gradle/wrapper/dists/gradle-9.3.1-all/*/gradle-9.3.1/bin/gradle.bat :probe:assembleDebug
+```
+
 ## 路径约定
 
 文档正文里提到的仓库路径一律写成**从仓库根开始**的形式（`app/lib/route_summary.dart`、`docs/adr/0002-…`），不写相对路径，这样文件在 docs 内部移动时引用不会失效。只有 Markdown 超链接才用相对路径，移动后需要同步修改。

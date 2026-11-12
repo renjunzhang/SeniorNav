@@ -63,8 +63,15 @@ done
 
 ```bash
 cd tools/sdk-probe
+export ANDROID_HOME=<Android SDK 路径>   # Windows Git Bash: /c/Users/<你>/AppData/Local/Android/Sdk
+
+# Linux/macOS
 ~/.gradle/wrapper/dists/gradle-9.3.1-all/*/gradle-9.3.1/bin/gradle :probe:assembleDebug
+# Windows Git Bash（注意是 gradle.bat，且缓存目录在 USERPROFILE 下）
+"$USERPROFILE"/.gradle/wrapper/dists/gradle-9.3.1-all/*/gradle-9.3.1/bin/gradle.bat :probe:assembleDebug
 ```
+
+用 Flutter 自带的 Gradle 缓存，不必另装 Gradle；路径里的 hash 目录名各机不同，故用 `*`。
 
 复用本机已缓存的 Gradle 9.3.1 / AGP 9.1.0（与主 App 同版本）；纯 Java，无 Kotlin 插件。
 依赖 `com.baidu.lbsyun:BaiduMapSDK_Search:9.0.0`（传递 base → common）。

@@ -141,17 +141,26 @@ git grep -nI -E '<真实小区名>|<真实纬度>|<真实经度>|1[3-9][0-9]{9}'
 
 ## 附录 A：启用钩子（首次提交前执行）
 
+**每个克隆都要做一次**，`core.hooksPath` 是本地配置，不随仓库传播。
+Windows 用 **Git Bash** 执行下面同样的命令（Git for Windows 自带 bash 与 GNU coreutils）。
+
 ```bash
-cd /home/zrj/SeniorNav
-git init
+cd <仓库根目录>
 git config core.hooksPath .githooks
-chmod +x .githooks/pre-commit .githooks/pre-push
+chmod +x .githooks/pre-commit .githooks/pre-push   # Windows 上可省略，Git Bash 不看执行位
 
 # 本地隐私词表：只存在 .git/ 内，永不提交（一行一个词）
 # 把真实小区名、完整坐标、POI UID 等写进去；不要写进本文件
 printf '%s\n' '<真实小区名>' '<真实纬度>' '<真实经度>' '<真实POI_UID>' > .git/privacy-terms
 chmod 600 .git/privacy-terms
 ```
+
+Windows 上 `chmod 600` 不生效，隐私词表改用文件属性限制访问；
+该文件在 `.git/` 内，本来就不会被提交。
+
+**换行必须是 LF。** 仓库已用 `.gitattributes` 钉死（`* text=auto eol=lf`），
+不需要也不应该再设 `core.autocrlf=true`——CRLF 会让 shebang 行尾多出 `\r`，
+钩子直接失效，而且是**静默失效**，看起来像"检查通过了"。
 
 验证钩子：
 

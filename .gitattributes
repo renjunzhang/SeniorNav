@@ -1,0 +1,8 @@
+# .githooks/* 与 tools/build_probe.sh 是 bash 脚本。Windows 上若 core.autocrlf
+# 把它们转成 CRLF，shebang 行尾的 \r 会让解释器找不到，钩子静默失效——
+# 这是安全防线，不能靠每个克隆者自己记得设 autocrlf。故在仓库侧钉死 LF。
+* text=auto eol=lf
+
+# 二进制：不做换行转换
+*.png binary
+*.docx binary

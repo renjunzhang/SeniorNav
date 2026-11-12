@@ -25,6 +25,7 @@ import glob
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 
@@ -164,7 +165,12 @@ def main():
     out_path = os.path.join(HERE, "dart_out.json")
     with open(pts_path, "w", encoding="utf-8") as fh:
         json.dump(points, fh, ensure_ascii=False, indent=2)
-    subprocess.run(["dart", "run", "bin/convert.dart", pts_path, out_path],
+    # Windows 上 dart 是 dart.bat，CreateProcess 不套 PATHEXT，直接传 "dart" 会
+    # FileNotFoundError。shutil.which 两个平台都能解析出可执行文件的绝对路径。
+    dart_bin = shutil.which("dart")
+    if dart_bin is None:
+        sys.exit("PATH 里找不到 dart，先把 Flutter SDK 的 bin 目录加进 PATH。")
+    subprocess.run([dart_bin, "run", "bin/convert.dart", pts_path, out_path],
                    cwd=HERE, check=True)
     with open(out_path, encoding="utf-8") as fh:
         dart = {row["id"]: row for row in json.load(fh)}

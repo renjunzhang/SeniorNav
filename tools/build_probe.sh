@@ -10,8 +10,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if ! command -v flutter >/dev/null 2>&1; then
-  echo "PATH 里找不到 flutter。交互式 shell 由 ~/.zshrc 提供；" >&2
-  echo "脚本化调用请先 export PATH=\"\$HOME/development/flutter/bin:\$PATH\"" >&2
+  echo "PATH 里找不到 flutter。把 Flutter SDK 的 bin 目录加进 PATH 后重试：" >&2
+  echo "  Linux/macOS: export PATH=\"<flutter>/bin:\$PATH\"" >&2
+  echo "  Windows(Git Bash): export PATH=\"/<flutter>/bin:\$PATH\"" >&2
   exit 1
 fi
 
@@ -19,7 +20,7 @@ PLACES=tools/.env.places
 if [ ! -r "$PLACES" ]; then
   echo "缺少 $PLACES，先执行：" >&2
   echo "  set -a && . ./.env.local && set +a" >&2
-  echo "  python3 tools/write_places_env.py <父POI_UID>" >&2
+  echo "  python3 tools/write_places_env.py <父POI_UID>   # Windows 上命令名可能是 python" >&2
   exit 1
 fi
 

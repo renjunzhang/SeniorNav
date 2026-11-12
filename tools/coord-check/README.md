@@ -9,11 +9,15 @@
 ## 跑法
 
 ```bash
-export PATH=/home/zrj/development/flutter/bin:$PATH   # 脚本要调 dart
+# Flutter SDK 的 bin 要在 PATH 里（脚本要调 dart）
+export PATH=<flutter>/bin:$PATH        # Windows Git Bash 同样写法，路径用 /c/... 形式
 cd tools/coord-check && dart pub get && cd ../..
 set -a && . ./.env.local && set +a
-python3 tools/coord-check/crosscheck.py
+python3 tools/coord-check/crosscheck.py   # Windows 上命令名可能是 python
 ```
+
+Windows 用 **Git Bash** 跑（`set -a` / `. ./.env.local` 是 bash 语法，cmd 与 PowerShell 不认）。
+脚本用 `shutil.which` 解析 `dart`，因此 Windows 上的 `dart.bat` 也能找到。
 
 退出码 0 = 通过（最大偏差 ≤ 1 米），1 = 不通过。产物 `points.json` / `dart_out.json`
 已在 `.gitignore` 里，不入库。
