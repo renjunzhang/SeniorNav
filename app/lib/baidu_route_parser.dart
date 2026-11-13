@@ -130,8 +130,12 @@ RouteSummary _transitRoute(Map<String, dynamic> route, {
     for (final segment in group) {
       final detail = _asMap(_asMap(segment['vehicle_info'])?['detail']);
       final transType = _asOptionalInt(segment['trans_type']);
+      // 换乘步行段会挂 type=-1 的空 detail（实测「站厅换乘 步行231米」），
+      // 不是车辆段；当成 unknown 腿会误杀整条纯地铁换乘路线。
+      final transferStub =
+          detail != null && _asOptionalInt(detail['type']) == -1;
 
-      if (detail != null) {
+      if (detail != null && !transferStub) {
         // 同一组里的多条车辆段是「这一段可任选其一」的备选线路，不是连续乘车：
         // 实测 metro_direct 第 5 条方案一组里有 4 条线路，距离之和 19081 米，
         // 而整条 route.distance 只有 14114 米。逐条建 leg 会把换乘次数算成 3。
@@ -156,7 +160,9 @@ RouteSummary _transitRoute(Map<String, dynamic> route, {
       // trans_type == 3 是同站换乘标记，距离恒为 1 米；计入会让步行数虚高。
       // trans_type == 4 是换乘步行（实测 instructions 为「步行228米」），
       // 漏掉它会让换乘方案的步行距离和「步行到上车站」文案一起缺失。
-      if (transType == 0 || transType == 4) {
+      if (transType == 0 ||
+          transType == 4 ||
+          (transferStub && transType != 3)) {
         final distance = _asInt(segment['distance'], context: '步行段 distance');
         walkM += distance;
         pendingWalkM += distance;

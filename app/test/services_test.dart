@@ -164,7 +164,7 @@ void main() {
       expect(calls, ['initialize', 'transit', 'transit', 'walking']);
       expect(bundle.metro!.legs.first.direction, isNotEmpty);
       expect(
-        bundle.metro!.legs.any((leg) => leg.lineType == LineType.metro),
+        bundle.metro!.legs.every((leg) => leg.lineType == LineType.metro),
         isTrue,
       );
       expect(
@@ -278,7 +278,7 @@ void main() {
     expect(bundle.walking, isNotNull);
   });
 
-  test('mixed metro warns about bus connections and unknown rides never become bus', () async {
+  test('metro keeps only all-metro routes and unknown rides never become bus', () async {
     final client = BaiduClient(
       privacyAccepted: () => true,
       invoke: (method, args) async {
@@ -287,6 +287,7 @@ void main() {
         return args?['policy'] == 5
             ? ridePayload([
                 [1, 0],
+                [1, 1],
               ])
             : ridePayload([
                 [1],
@@ -300,10 +301,40 @@ void main() {
       location: () async => const GeoPoint(31.8, 117.3),
     ).load(samplePlace());
     expect(bundle.metro, isNotNull);
-    expect(bundle.metroMessage, contains('公交接驳'));
+    expect(bundle.metro!.legs, hasLength(2));
+    expect(
+      bundle.metro!.legs.every((leg) => leg.lineType == LineType.metro),
+      isTrue,
+    );
+    expect(bundle.metroMessage, isNull);
     expect(bundle.transit, isNull);
     expect(bundle.transitMessage, contains('符合条件'));
     expect(bundle.recommendedMode, RouteMode.metro);
+  });
+
+  test('metro with only feeder routes shows no metro option', () async {
+    final client = BaiduClient(
+      privacyAccepted: () => true,
+      invoke: (method, args) async {
+        if (method == 'initialize') return null;
+        if (method == 'walking') return '{"status":0,"result":{"routes":[]}}';
+        return args?['policy'] == 5
+            ? ridePayload([
+                [1, 0],
+              ])
+            : ridePayload([
+                [0],
+              ]);
+      },
+    );
+    final bundle = await SdkRouteService(
+      client,
+      location: () async => const GeoPoint(31.8, 117.3),
+    ).load(samplePlace());
+    expect(bundle.metro, isNull);
+    expect(bundle.metroMessage, contains('符合条件'));
+    expect(bundle.transit, isNotNull);
+    expect(bundle.recommendedMode, RouteMode.transit);
   });
 
   test('native metro and bus navigation use separate URI policies', () async {

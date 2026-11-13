@@ -121,6 +121,13 @@ abstract interface class RouteService {
   Future<RouteBundle> load(SavedPlace destination);
 }
 
+/// 上次路线摘要的本地缓存，断网/定位失败时兜底展示。
+/// 只存路线本身，绝不存起点坐标；读写失败不抛异常，不能影响正常查询。
+abstract interface class RouteCache {
+  Future<void> save(String placeId, RouteBundle bundle);
+  Future<RouteBundle?> read(String placeId);
+}
+
 enum NavigationOutcome { nativeApp, web, unavailable }
 
 abstract interface class NavigationService {
@@ -145,9 +152,11 @@ class AppServices {
     required this.poi,
     required this.routes,
     required this.navigation,
+    required this.cache,
   });
   final PlaceRepository places;
   final PoiService poi;
   final RouteService routes;
   final NavigationService navigation;
+  final RouteCache cache;
 }

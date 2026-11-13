@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:seniornav/core/contracts.dart';
 import 'package:seniornav/data/local_place_repository.dart';
+import 'package:seniornav/route_summary.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 SavedPlace place(
@@ -10,22 +11,42 @@ SavedPlace place(
   int slot = 0,
   int sort = 0,
   bool verified = true,
+  String? label,
+  double? latitude,
 }) {
   final now = DateTime(2026, 1, 1);
   return SavedPlace(
     id: id,
     slot: slot,
-    label: '测试地点 $id',
+    label: label ?? '测试地点 $id',
     icon: 'place',
     name: '虚构测试地点',
     address: '虚构测试地址',
     city: '合肥',
-    latitude: 31.86,
+    latitude: latitude ?? 31.86,
     longitude: 117.28,
     poiUid: 'test-poi-$id',
     updatedAt: now,
     verifiedAt: verified ? now : null,
     sortOrder: sort,
+  );
+}
+
+RouteBundle bundle({DateTime? at, GeoPoint? origin}) {
+  final fetchedAt = at ?? DateTime(2026, 11, 13, 14, 52);
+  return RouteBundle(
+    recommendedMode: RouteMode.transit,
+    fetchedAt: fetchedAt,
+    origin: origin,
+    transit: RouteSummary(
+      mode: RouteMode.transit,
+      durationSec: 1800,
+      distanceM: 6000,
+      fetchedAt: fetchedAt,
+      legs: const [
+        TransitLeg(lineName: '1路', lineType: LineType.bus, stopCount: 2),
+      ],
+    ),
   );
 }
 
@@ -122,7 +143,7 @@ void main() {
     );
     final db = await databaseFactoryFfi.openDatabase(dbPath);
     expect((await db.query('places')).single['coordSystem'], 'BD-09');
-    expect(await db.getVersion(), 1);
+    expect(await db.getVersion(), 2);
     expect(repository.places.single.id, 'home');
   });
 
@@ -185,5 +206,97 @@ void main() {
     await repository.initialize();
     expect(repository.places.map((p) => p.id), ['home', 'two', 'one']);
     expect(repository.places.last.rev, 2);
+  });
+
+  test('route cache round-trips through reopen and never stores origin', () async {
+    await repository.acceptPrivacy();
+    await repository.savePlace(place('one', slot: 2));
+    await repository.save('one', bundle(origin: const GeoPoint(31.8, 117.3)));
+    final read = await repository.read('one');
+    expect(read!.transit!.legs.single.lineName, '1路');
+    expect(read.origin, isNull);
+    final db = await databaseFactoryFfi.openDatabase(dbPath);
+    final raw = (await db.query('route_cache')).single['bundle'] as String;
+    expect(raw.contains('origin'), isFalse);
+    expect(raw.contains('31.8'), isFalse);
+    await repository.save('one', bundle(at: DateTime(2026, 11, 14)));
+    expect((await repository.read('one'))!.fetchedAt, DateTime(2026, 11, 14));
+    await repository.close();
+    await repository.initialize();
+    expect((await repository.read('one'))!.transit!.legs.single.lineName, '1路');
+    expect(await repository.read('missing'), isNull);
+  });
+
+  test('destination edit clears cache; label-only edit keeps it', () async {
+    await repository.acceptPrivacy();
+    await repository.savePlace(place('one', slot: 2));
+    await repository.save('one', bundle());
+    await repository.savePlace(place('one', slot: 2, label: '新名字'));
+    expect(await repository.read('one'), isNotNull);
+    await repository.savePlace(place('one', slot: 2, latitude: 31.9));
+    expect(await repository.read('one'), isNull);
+  });
+
+  test('deleting a place clears its cache', () async {
+    await repository.acceptPrivacy();
+    await repository.savePlace(place('one', slot: 2));
+    await repository.save('one', bundle());
+    await repository.deletePlace('one');
+    expect(await repository.read('one'), isNull);
+  });
+
+  test('v1 database upgrades in place, keeping places and settings', () async {
+    final v1Path = '${directory.path}/v1.db';
+    final old = await databaseFactoryFfi.openDatabase(
+      v1Path,
+      options: OpenDatabaseOptions(
+        version: 1,
+        onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE places (
+              id TEXT PRIMARY KEY,
+              slot INTEGER NOT NULL CHECK (slot BETWEEN 0 AND 4),
+              label TEXT NOT NULL,
+              icon TEXT NOT NULL,
+              name TEXT NOT NULL,
+              address TEXT NOT NULL,
+              city TEXT NOT NULL,
+              latitude REAL NOT NULL,
+              longitude REAL NOT NULL,
+              coordSystem TEXT NOT NULL CHECK (coordSystem = 'BD-09'),
+              poiUid TEXT NOT NULL,
+              updatedAt INTEGER NOT NULL,
+              verifiedAt INTEGER NOT NULL,
+              sortOrder INTEGER NOT NULL DEFAULT 0,
+              rev INTEGER NOT NULL DEFAULT 1,
+              deletedAt INTEGER
+            )
+          ''');
+          await db.execute('''
+            CREATE UNIQUE INDEX active_home_slot ON places(slot)
+            WHERE slot > 0 AND deletedAt IS NULL
+          ''');
+          await db.execute('''
+            CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)
+          ''');
+        },
+      ),
+    );
+    await old.insert('settings', {'key': 'privacyAccepted', 'value': '1'});
+    await old.close();
+    final upgraded = LocalPlaceRepository(
+      databaseFactory: databaseFactoryFfi,
+      databasePath: v1Path,
+    );
+    await upgraded.initialize();
+    expect(upgraded.privacyAccepted, isTrue);
+    await upgraded.savePlace(place('one', slot: 2));
+    await upgraded.save('one', bundle());
+    expect((await upgraded.read('one'))!.transit!.legs.single.lineName, '1路');
+    final db = await databaseFactoryFfi.openDatabase(v1Path);
+    expect(await db.getVersion(), 2);
+    await db.close();
+    await upgraded.close();
+    upgraded.dispose();
   });
 }

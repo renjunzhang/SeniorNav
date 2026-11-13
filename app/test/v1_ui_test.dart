@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:seniornav/core/contracts.dart';
 import 'package:seniornav/features/route/route_page.dart';
+import 'package:seniornav/features/route/route_strip.dart';
 import 'package:seniornav/main.dart' show StartupFailureApp;
 import 'package:seniornav/route_summary.dart';
 import 'package:seniornav/seniornav_app.dart';
@@ -103,6 +104,19 @@ class _Navigation implements NavigationService {
       NavigationOutcome.nativeApp;
 }
 
+class _Cache implements RouteCache {
+  final Map<String, RouteBundle> store = {};
+  int saves = 0;
+  @override
+  Future<void> save(String placeId, RouteBundle bundle) async {
+    saves++;
+    store[placeId] = bundle;
+  }
+
+  @override
+  Future<RouteBundle?> read(String placeId) async => store[placeId];
+}
+
 void _size(
   WidgetTester tester, {
   double scale = 1,
@@ -120,11 +134,13 @@ AppServices _services({
   _Places? places,
   _Routes? routes,
   _Navigation? navigation,
+  _Cache? cache,
 }) => AppServices(
   places: places ?? _Places(saved: [_place]),
   poi: _Poi(),
   routes: routes ?? _Routes(),
   navigation: navigation ?? _Navigation(),
+  cache: cache ?? _Cache(),
 );
 
 Finder _modeFinder(RouteMode mode) =>
@@ -185,7 +201,7 @@ RouteBundle _threeModes({RouteMode recommended = RouteMode.metro}) {
       distanceM: 950,
       fetchedAt: now,
     ),
-    metroMessage: '这条地铁方案包含公交接驳，请留意换乘。',
+    metroMessage: '这是地铁方案提示。',
     transitMessage: '这是公交方案提示。',
     walkingMessage: '这是步行方案提示。',
   );
@@ -458,7 +474,7 @@ void main() {
       lessThan(tester.getTopLeft(_modeFinder(RouteMode.transit)).dx),
     );
     expect(find.textContaining('示例地铁线'), findsOneWidget);
-    expect(find.text('这条地铁方案包含公交接驳，请留意换乘。'), findsOneWidget);
+    expect(find.text('这是地铁方案提示。'), findsOneWidget);
     for (final mode in [
       RouteMode.metro,
       RouteMode.transit,
@@ -575,6 +591,22 @@ void main() {
     });
   }
 
+  testWidgets('公交/地铁摘要用线路示意图替代文字步骤，步行仍用文字', (tester) async {
+    _size(tester);
+    final routes = _Routes()..handler = () async => _threeModes();
+    await tester.pumpWidget(SeniorNavApp(services: _services(routes: routes)));
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    expect(find.byType(RouteStrip), findsOneWidget);
+    expect(find.text('示例上车站'), findsOneWidget);
+    expect(find.text('示例下车站'), findsOneWidget);
+    expect(find.textContaining('①'), findsNothing);
+    await tester.tap(_modeFinder(RouteMode.walking));
+    await tester.pump();
+    expect(find.byType(RouteStrip), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('网页回退明确要求重新核对出行方式', (tester) async {
     _size(tester);
     final navigation = _Navigation()..outcome = NavigationOutcome.web;
@@ -588,6 +620,93 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('网页未必保留当前选择，请重新核对起点和出行方式'), findsOneWidget);
     expect(navigation.lastMode, RouteMode.metro);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('查询失败展示上次路线，明确过期提示并带日期', (tester) async {
+    _size(tester);
+    final old = DateTime.now().subtract(const Duration(days: 1));
+    final cache = _Cache();
+    cache.store[_place.id] = RouteBundle(
+      recommendedMode: RouteMode.transit,
+      fetchedAt: old,
+      transit: RouteSummary(
+        mode: RouteMode.transit,
+        durationSec: 1800,
+        distanceM: 6000,
+        fetchedAt: old,
+        legs: const [
+          TransitLeg(
+            lineName: '示例公交线',
+            lineType: LineType.bus,
+            boardStop: '示例公交上车站',
+            alightStop: '示例公交下车站',
+            stopCount: 8,
+          ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(SeniorNavApp(services: _services(cache: cache)));
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    expect(find.text('这是上次查询的路线'), findsOneWidget);
+    expect(find.textContaining('可能已过期'), findsOneWidget);
+    expect(find.textContaining('网络不好，请打开百度地图。'), findsOneWidget);
+    expect(find.textContaining('${old.month}月${old.day}日'), findsWidgets);
+    expect(find.textContaining('示例公交线'), findsOneWidget);
+    expect(_modeSemantics(tester, RouteMode.transit).selected, isTrue);
+    expect(find.text('路线已超过 5 分钟，请重新查询。'), findsNothing);
+    expect(cache.saves, 0);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('查询成功写入缓存，再次失败时展示缓存路线', (tester) async {
+    _size(tester);
+    final cache = _Cache();
+    final routes = _Routes()..handler = () async => _threeModes();
+    await tester.pumpWidget(
+      SeniorNavApp(services: _services(routes: routes, cache: cache)),
+    );
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    expect(cache.saves, 1);
+    expect(cache.store[_place.id], isNotNull);
+    expect(find.text('这是上次查询的路线'), findsNothing);
+    routes.handler = () async => throw const AppFailure('网络不好，请打开百度地图。');
+    await tester.tap(find.byKey(const ValueKey('refresh-routes')));
+    await tester.pumpAndSettle();
+    expect(find.text('这是上次查询的路线'), findsOneWidget);
+    expect(find.textContaining('示例地铁线'), findsOneWidget);
+    expect(routes.calls, 2);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('缓存路线即使新鲜也不向导航传递起点', (tester) async {
+    _size(tester);
+    final now = DateTime.now();
+    final cache = _Cache();
+    cache.store[_place.id] = RouteBundle(
+      recommendedMode: RouteMode.walking,
+      fetchedAt: now,
+      origin: const GeoPoint(31.8, 117.3),
+      walking: RouteSummary(
+        mode: RouteMode.walking,
+        durationSec: 720,
+        distanceM: 950,
+        fetchedAt: now,
+      ),
+    );
+    final navigation = _Navigation();
+    await tester.pumpWidget(
+      SeniorNavApp(services: _services(navigation: navigation, cache: cache)),
+    );
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    expect(find.text('这是上次查询的路线'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('open-map')));
+    await tester.pumpAndSettle();
+    expect(navigation.lastMode, RouteMode.walking);
+    expect(navigation.lastOrigin, isNull);
     await tester.pumpWidget(const SizedBox());
   });
 }

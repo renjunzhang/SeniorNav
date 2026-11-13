@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/contracts.dart';
 import '../../route_summary.dart';
+import 'route_strip.dart';
 
 String _modeLabel(RouteMode mode) => switch (mode) {
   RouteMode.metro => '坐地铁',
@@ -41,6 +42,8 @@ class _RoutePageState extends State<RoutePage> {
   bool _slow = false;
   bool _openingMap = false;
   String? _error;
+  bool _fromCache = false;
+  String? _cacheReason;
   Timer? _slowTimer;
   Timer? _clockTimer;
   late bool _lastBusy;
@@ -77,6 +80,9 @@ class _RoutePageState extends State<RoutePage> {
           _waitingForPrevious = !_loading;
           _lastBusy = widget.services.routes.busy;
           _error = '上一条查询仍在处理，请稍候。也可以直接打开百度地图。';
+          _bundle = null;
+          _fromCache = false;
+          _cacheReason = null;
         });
       }
       return;
@@ -91,6 +97,8 @@ class _RoutePageState extends State<RoutePage> {
       _slow = false;
       _error = null;
       _bundle = null;
+      _fromCache = false;
+      _cacheReason = null;
       _waitingForPrevious = false;
       _lastStale = false;
     });
@@ -105,11 +113,28 @@ class _RoutePageState extends State<RoutePage> {
         _bundle = result;
         if (!_modeSelectedDuringLoad) _mode = result.recommendedMode;
       });
+      if (result.metro != null ||
+          result.transit != null ||
+          result.walking != null) {
+        await widget.services.cache.save(widget.place.id, result);
+      }
     } catch (error) {
       if (!mounted) return;
-      setState(
-        () => _error = error is AppFailure ? error.message : '暂时查不到路线，请打开百度地图。',
-      );
+      final reason = error is AppFailure
+          ? error.message
+          : '暂时查不到路线，请打开百度地图。';
+      final cached = await widget.services.cache.read(widget.place.id);
+      if (!mounted) return;
+      if (cached == null) {
+        setState(() => _error = reason);
+      } else {
+        setState(() {
+          _bundle = cached;
+          _fromCache = true;
+          _cacheReason = reason;
+          if (!_modeSelectedDuringLoad) _mode = cached.recommendedMode;
+        });
+      }
     } finally {
       _slowTimer?.cancel();
       if (mounted) setState(() => _loading = false);
@@ -128,7 +153,9 @@ class _RoutePageState extends State<RoutePage> {
     setState(() => _openingMap = true);
     try {
       final bundle = _bundle;
-      final freshOrigin = bundle != null && !_isStale(bundle, DateTime.now())
+      // 缓存路线绝不带起点：即使缓存里混进了坐标也不传给导航。
+      final freshOrigin =
+          bundle != null && !_fromCache && !_isStale(bundle, DateTime.now())
           ? bundle.origin
           : null;
       final outcome = await widget.services.navigation.open(
@@ -238,6 +265,18 @@ class _RoutePageState extends State<RoutePage> {
                           onSelect: _selectMode,
                         ),
                         const SizedBox(height: 20),
+                        if (_fromCache && bundle != null) ...[
+                          _NoticeCard(
+                            icon: Icons.history_rounded,
+                            title: '这是上次查询的路线',
+                            message:
+                                '${_cacheReason ?? '现在查不到新路线。'}\n'
+                                '下面是 ${_queryTime(bundle.fetchedAt, now)} 查到的路线，可能已过期。'
+                                '出发前请以百度地图为准。',
+                            warning: true,
+                          ),
+                          const SizedBox(height: 14),
+                        ],
                         if (_loading)
                           _NoticeCard(
                             icon: Icons.hourglass_top_rounded,
@@ -253,7 +292,11 @@ class _RoutePageState extends State<RoutePage> {
                             message: _error!,
                           )
                         else if (summary != null) ...[
-                          _SummaryCard(route: route!, summary: summary),
+                          _SummaryCard(
+                            route: route!,
+                            summary: summary,
+                            destination: widget.place.label,
+                          ),
                           for (final warning in summary.warnings) ...[
                             const SizedBox(height: 14),
                             _NoticeCard(
@@ -279,8 +322,9 @@ class _RoutePageState extends State<RoutePage> {
                           ),
                         if (bundle != null) ...[
                           const SizedBox(height: 20),
-                          if (now.difference(bundle.fetchedAt) >
-                              const Duration(minutes: 5))
+                          if (!_fromCache &&
+                              now.difference(bundle.fetchedAt) >
+                                  const Duration(minutes: 5))
                             const Text(
                               '路线已超过 5 分钟，请重新查询。',
                               style: TextStyle(
@@ -290,7 +334,7 @@ class _RoutePageState extends State<RoutePage> {
                               ),
                             ),
                           Text(
-                            '查询时间 ${_time(bundle.fetchedAt)}',
+                            '查询时间 ${_queryTime(bundle.fetchedAt, now)}',
                             style: const TextStyle(
                               fontSize: 18,
                               color: Color(0xFF4D5E73),
@@ -352,6 +396,20 @@ class _RoutePageState extends State<RoutePage> {
 
   String _time(DateTime time) =>
       '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+
+  // 跨天的缓存必须带日期，否则老人会把昨天的路线当成刚才查的。
+  String _queryTime(DateTime time, DateTime now) {
+    final clock = _time(time);
+    if (time.year == now.year &&
+        time.month == now.month &&
+        time.day == now.day) {
+      return clock;
+    }
+    final date = time.year == now.year
+        ? '${time.month}月${time.day}日'
+        : '${time.year}年${time.month}月${time.day}日';
+    return '$date $clock';
+  }
 }
 
 class _ModeChoices extends StatelessWidget {
@@ -484,9 +542,14 @@ class _ModeButton extends StatelessWidget {
 }
 
 class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.route, required this.summary});
+  const _SummaryCard({
+    required this.route,
+    required this.summary,
+    required this.destination,
+  });
   final RouteSummary route;
   final SummaryText summary;
+  final String destination;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -519,23 +582,28 @@ class _SummaryCard extends StatelessWidget {
             ),
           ),
         ],
-        if (route.isTransit) ...[
+        if (route.isTransit && route.legs.isNotEmpty) ...[
           const SizedBox(height: 12),
-          Text(
-            '全程${formatDistance(route.distanceM)}',
-            style: const TextStyle(fontSize: 20, color: Color(0xFF4D5E73)),
-          ),
-        ],
-        for (final step in summary.steps) ...[
-          const SizedBox(height: 22),
-          Text(
-            step,
-            style: const TextStyle(
-              fontSize: 23,
-              height: 1.55,
-              color: Color(0xFF20334D),
+          RouteStrip(route: route, destination: destination),
+        ] else ...[
+          if (route.isTransit) ...[
+            const SizedBox(height: 12),
+            Text(
+              '全程${formatDistance(route.distanceM)}',
+              style: const TextStyle(fontSize: 20, color: Color(0xFF4D5E73)),
             ),
-          ),
+          ],
+          for (final step in summary.steps) ...[
+            const SizedBox(height: 22),
+            Text(
+              step,
+              style: const TextStyle(
+                fontSize: 23,
+                height: 1.55,
+                color: Color(0xFF20334D),
+              ),
+            ),
+          ],
         ],
       ],
     ),

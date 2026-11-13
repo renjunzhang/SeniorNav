@@ -6,9 +6,10 @@ import 'package:path/path.dart' as path;
 import 'package:sqflite/sqflite.dart' as sqlite;
 
 import '../core/contracts.dart';
+import 'route_cache.dart';
 
-/// 家庭地点只存本机；路线和当前定位不进入此数据库。
-class LocalPlaceRepository extends PlaceRepository {
+/// 家庭地点与上次路线摘要只存本机；当前定位不进入此数据库。
+class LocalPlaceRepository extends PlaceRepository implements RouteCache {
   LocalPlaceRepository({
     sqlite.DatabaseFactory? databaseFactory,
     this.databasePath,
@@ -41,7 +42,7 @@ class LocalPlaceRepository extends PlaceRepository {
       _database = await _factory.openDatabase(
         location,
         options: sqlite.OpenDatabaseOptions(
-          version: 1,
+          version: 2,
           onCreate: (db, version) async {
             await db.execute('''
               CREATE TABLE places (
@@ -70,6 +71,10 @@ class LocalPlaceRepository extends PlaceRepository {
             await db.execute('''
               CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)
             ''');
+            await _createRouteCache(db);
+          },
+          onUpgrade: (db, oldVersion, newVersion) async {
+            if (oldVersion < 2) await _createRouteCache(db);
           },
         ),
       );
@@ -84,6 +89,42 @@ class LocalPlaceRepository extends PlaceRepository {
     final value = _database;
     if (value == null) throw const AppFailure('地点资料尚未准备好');
     return value;
+  }
+
+  static Future<void> _createRouteCache(sqlite.DatabaseExecutor db) =>
+      db.execute('''
+        CREATE TABLE route_cache (
+          placeId TEXT PRIMARY KEY,
+          bundle TEXT NOT NULL
+        )
+      ''');
+
+  @override
+  Future<void> save(String placeId, RouteBundle bundle) async {
+    // 缓存是兜底：写不进去也不能影响刚查到的路线展示。
+    try {
+      await initialize();
+      await _db.insert('route_cache', {
+        'placeId': placeId,
+        'bundle': encodeRouteBundle(bundle),
+      }, conflictAlgorithm: sqlite.ConflictAlgorithm.replace);
+    } catch (_) {}
+  }
+
+  @override
+  Future<RouteBundle?> read(String placeId) async {
+    try {
+      await initialize();
+      final rows = await _db.query(
+        'route_cache',
+        where: 'placeId = ?',
+        whereArgs: [placeId],
+      );
+      if (rows.isEmpty) return null;
+      return decodeRouteBundle(rows.first['bundle'] as String);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _reload() async {
@@ -192,6 +233,16 @@ class LocalPlaceRepository extends PlaceRepository {
             where: 'id = ?',
             whereArgs: [place.id],
           );
+          // 目的地变了，旧路线不再适用；只改名称/排序时保留缓存。
+          if (existing.first['latitude'] != place.latitude ||
+              existing.first['longitude'] != place.longitude ||
+              existing.first['poiUid'] != place.poiUid) {
+            await txn.delete(
+              'route_cache',
+              where: 'placeId = ?',
+              whereArgs: [place.id],
+            );
+          }
         }
       });
       await _reload();
@@ -225,6 +276,7 @@ class LocalPlaceRepository extends PlaceRepository {
           where: 'id = ?',
           whereArgs: [id],
         );
+        await txn.delete('route_cache', where: 'placeId = ?', whereArgs: [id]);
       });
       await _reload();
     } on AppFailure {

@@ -116,7 +116,7 @@ class _HomePageState extends State<HomePage> {
             title: const Text('查询路线前，请先确认'),
             scrollable: true,
             content: const Text(
-              '只在你查询路线时获取一次当前位置，并将起点和目的地交给百度地图查询。\n\n常用地点仅保存在这台手机，不持续定位、不记录行踪。请家人协助阅读并确认。',
+              '只在你查询路线时获取一次当前位置，并将起点和目的地交给百度地图查询。\n\n常用地点和上次查到的路线仅保存在这台手机，不持续定位、不记录行踪。请家人协助阅读并确认。',
             ),
             actions: [
               TextButton(

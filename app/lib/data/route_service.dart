@@ -119,10 +119,6 @@ class SdkRouteService implements RouteService {
         if (route == null && messages[mode] == null)
           _message(results[mode], label) ?? '暂时没有符合条件的$label方案，请打开百度地图核对。',
         if (route != null && client.blocked) '后续查询未完成，已保留这条路线，请以百度地图为准。',
-        if (mode == RouteMode.metro &&
-            route != null &&
-            route.legs.any((leg) => leg.lineType == LineType.bus))
-          '这条地铁路线还需要坐公交接驳，请留意换乘。',
         if (mode == RouteMode.walking && advice == ModeAdvice.walkFarWarning)
           '步行距离较远，出发前请让家人协助确认。',
       ];
@@ -149,8 +145,9 @@ class SdkRouteService implements RouteService {
           route.legs.any((leg) => leg.lineType == LineType.unknown)) {
         return false;
       }
+      // 地铁只保留全程地铁的方案，公交接驳路线不进地铁选项。
       return metro
-          ? route.legs.any((leg) => leg.lineType == LineType.metro)
+          ? route.legs.every((leg) => leg.lineType == LineType.metro)
           : route.legs.every((leg) => leg.lineType == LineType.bus);
     }).toList();
     return candidates.isEmpty ? null : selectRoute(candidates);

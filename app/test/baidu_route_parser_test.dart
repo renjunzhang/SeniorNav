@@ -72,6 +72,102 @@ void main() {
       expect(routes[4].legs[1].boardWalkM, 338);
     });
 
+    test('换乘步行段的 type=-1 空 detail 不建腿，距离计入步行', () {
+      // 回归：实测纯地铁换乘方案（A线→1号线）中间挂着
+      // detail={type:-1,name:null} 的「站厅换乘 步行231米」段，
+      // 旧实现把它当 unknown 车辆段，整条纯地铁路线被过滤。
+      Map<String, dynamic> vehicle(String name) => {
+            'trans_type': -1,
+            'distance': 3000,
+            'vehicle_info': {
+              'detail': {'name': name, 'type': 1, 'stop_num': 3},
+            },
+          };
+      final payload = {
+        'status': 0,
+        'result': {
+          'routes': [
+            {
+              'duration': 3371,
+              'distance': 15000,
+              'steps': [
+                [
+                  {'trans_type': 0, 'distance': 773},
+                ],
+                [vehicle('轨道交通A线')],
+                [
+                  {
+                    'trans_type': 1,
+                    'distance': 231,
+                    'vehicle_info': {
+                      'detail': {'type': -1, 'name': null},
+                    },
+                  },
+                ],
+                [vehicle('轨道交通1号线')],
+                [
+                  {'trans_type': 0, 'distance': 849},
+                ],
+              ],
+            },
+          ],
+        },
+      };
+      final route = parsed(parseTransit(payload, fetchedAt: recordedAt)).single;
+      expect(route.legs, hasLength(2));
+      expect(route.legs.every((leg) => leg.lineType == LineType.metro), isTrue);
+      expect(route.transfers, 1);
+      expect(route.walkM, 773 + 231 + 849);
+      expect(route.legs[1].boardWalkM, 231);
+    });
+
+    test('type=-1 空 detail 的同站换乘标记（trans_type=3）不计步行', () {
+      final payload = {
+        'status': 0,
+        'result': {
+          'routes': [
+            {
+              'duration': 600,
+              'distance': 3000,
+              'steps': [
+                [
+                  {
+                    'trans_type': -1,
+                    'distance': 1000,
+                    'vehicle_info': {
+                      'detail': {'name': '轨道交通A线', 'type': 1},
+                    },
+                  },
+                ],
+                [
+                  {
+                    'trans_type': 3,
+                    'distance': 1,
+                    'vehicle_info': {
+                      'detail': {'type': -1, 'name': null},
+                    },
+                  },
+                ],
+                [
+                  {
+                    'trans_type': -1,
+                    'distance': 1000,
+                    'vehicle_info': {
+                      'detail': {'name': '轨道交通1号线', 'type': 1},
+                    },
+                  },
+                ],
+              ],
+            },
+          ],
+        },
+      };
+      final route = parsed(parseTransit(payload, fetchedAt: recordedAt)).single;
+      expect(route.legs, hasLength(2));
+      expect(route.walkM, 0);
+      expect(route.legs[1].boardWalkM, 0);
+    });
+
     test('同组多条车辆段是备选线路，只算一段乘车', () {
       // 回归：metro_direct 第 5 条方案的一组里有 4路/T38路/T37路/T12路 四条
       // 备选线路，距离之和 19081 米 > 整条 route.distance 14114 米，证明是

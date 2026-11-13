@@ -101,6 +101,13 @@ class _Routes implements RouteService {
       throw UnimplementedError();
 }
 
+class _Cache implements RouteCache {
+  @override
+  Future<void> save(String placeId, RouteBundle bundle) async {}
+  @override
+  Future<RouteBundle?> read(String placeId) async => null;
+}
+
 void main() {
   late _Places places;
   late _Poi poi;
@@ -115,6 +122,7 @@ void main() {
             poi: poi,
             routes: _Routes(),
             navigation: navigation,
+            cache: _Cache(),
           ),
         ),
       ),

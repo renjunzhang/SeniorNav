@@ -13,5 +13,6 @@ Future<AppServices> createAppServices() async {
     poi: SdkPoiService(client),
     routes: SdkRouteService(client),
     navigation: BaiduNavigationService(),
+    cache: places,
   );
 }
