@@ -1,17 +1,74 @@
-# seniornav
+# SeniorNav Android 初版（0.1.0+1）
 
-A new Flutter project.
+面向老人的出行决策助手：五个固定首页入口，查看一条公交/步行推荐摘要，再打开百度地图导航。
+目前已实现正式首页、更多地点、路线摘要与本地家属设置；默认空库，不内置演示线路或私人家庭地点。
 
-## Getting Started
+当前为可试用初版，不代表 M0/M1 的所有验收已结束。首次设置和已知限制见
+[初版试用说明](../docs/m1/初版试用说明.md)，产品范围以 [v0.2 方案](../docs/plan/SeniorNav_项目初步方案_v0.2.md) 为准。
 
-This project is a starting point for a Flutter application.
+## 构建与安装
 
-A few resources to get you started if this is your first Flutter project:
+在仓库根目录执行。需要 Flutter、Android SDK，以及已绑定包名/签名的 Android 类型百度 AK。
+AK 由环境变量 `BAIDU_ANDROID_AK` 或本机 ignored `.env.local` 提供，不写进源码。
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+```bash
+python3 tools/build_app.py
+# 发布模式构建：
+python3 tools/build_app.py --release
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+脚本固定使用正式入口 `app/lib/main.dart`，只把 Android AK 交给构建，移除已知的服务端密钥与
+`PROBE_PLACES_JSON` 环境变量。正式初版不读取 M0 私人地点注入文件。
+
+| 构建 | APK 路径 |
+|---|---|
+| Debug | `app/build/app/outputs/flutter-apk/app-debug.apk` |
+| Release | `app/build/app/outputs/flutter-apk/app-release.apk` |
+
+构建完成后可用 `adb install -r <APK 路径>` 覆盖安装。同包名的正式 App、M0 URI 探针与 SDK 探针不能共存。
+保留手机上的地点设置时使用覆盖安装，不要卸载或清除应用数据。
+
+## 首次使用
+
+1. 首页连续点按 **SeniorNav 标题三次**，进入家属设置。
+2. 首次自设 4～6 位数字 PIN；以后进入设置需验证。PIN 只防误触，不加密地点资料。
+3. 阅读并明确同意位置与地图服务说明。
+4. 选择首页位置或添加“更多地点”，填写城市和地点名称，点击搜索；输入过程不会自动查询。
+5. 选择 POI，打开百度地图核对位置与入口；返回 App，勾选已核对，再保存。
+   若提示未提供导航入口，先搜索具体大门或出入口，不把地点中心默认当入口。
+6. 返回首页，点击地点查询路线；阅读摘要后，点击“打开地图导航”。
+
+地点、PIN 校验信息与同意状态保存在本机 SQLite，路线和当前定位不落库；Android 云备份已关闭。
+家固定在第一个位置，可以改地址，不能删除或移动；其余地点可编辑、删除或调整位置与顺序。
+
+## 百度请求纪律
+
+- 个人认证路线服务并发上限为 3，本 App 主动限制为 **最多 1 条在途检索**。
+- POI、POI 详情与路线共用 Dart 操作锁和原生进程锁；公交、步行及一次少换乘策略补查均串行。
+- 不自动重试；离开页面、界面等待超时或发起返回 `false` 都不能视为服务端已经结束。
+- 无法确认请求结束时会阻止后续查询，并保留打开百度地图的出路。
+- 不要同时运行本 App、SDK 探针或其他百度检索脚本。需要重新打开 App 排查时由人操作，
+  不使用循环重启或自动重试脚本绕过保护。
+
+## 本地验证与当前状态
+
+在 `app/` 目录运行离线检查：
+
+```bash
+flutter analyze
+flutter test
+```
+
+测试使用虚构地点或公共地标 fixture，不能把测试数据当成手机当前的实际路线。
+
+- 完整 Debug 与 Release APK 已构建通过；Release 约 57.4 MB，最终交付以总调度确认的产物为准。
+- `flutter analyze` 零问题，`flutter test` **108 项通过**；原生串行闸门另有 **8 项断言通过**。
+- Flutter + SDK 集成烟测 **4 次串行调用成功**，不代表完整手机设置流程或长期性能已验收。
+- 仍需老人实际试用、户外定位与入口核验，以及足量路线样本的长期 p95 验收。
+- 百度未安装或版本过旧时提供网页版回退；没有可用起点坐标时，网页可能要求手动选择起点。
+
+## 保留的 M0 工具
+
+旧 URI 探针入口在 `app/lib/m0_probe.dart`；`bash tools/build_probe.sh` 已显式指定该 target。
+该脚本会注入本机私人地点，产物与正式初版用途不同，不能作为无私人数据的正式包外发。
+SDK 探针另见 [tools/sdk-probe/README.md](../tools/sdk-probe/README.md)。

@@ -27,6 +27,10 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["baiduAk"] =
+            (project.findProperty("baiduAk") as String?)
+                ?: System.getenv("BAIDU_ANDROID_AK")
+                ?: ""
     }
 
     buildTypes {
@@ -36,6 +40,11 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+}
+
+dependencies {
+    // Search + base/common only. No Map, Navi, location SDK, or official Flutter wrapper.
+    implementation("com.baidu.lbsyun:BaiduMapSDK_Search:9.0.0")
 }
 
 kotlin {

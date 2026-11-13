@@ -45,6 +45,7 @@ app/coverage/
 
 # ---- Android 构建与本机配置 ----
 app/android/.gradle/
+app/android/build/
 app/android/local.properties
 app/android/app/debug/
 app/android/app/profile/

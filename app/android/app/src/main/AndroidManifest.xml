@@ -1,11 +1,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- One foreground fix via geolocator; never request background location. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- allowBackup=false：V1 的 SQLite 会存家庭住址与联系电话，
          Flutter 模板默认的 true 会让系统云备份把这些数据带走。 -->
     <application
-        android:label="SeniorNav M0"
+        android:label="SeniorNav"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false">
+        <meta-data
+            android:name="com.baidu.lbsapi.API_KEY"
+            android:value="${baiduAk}" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

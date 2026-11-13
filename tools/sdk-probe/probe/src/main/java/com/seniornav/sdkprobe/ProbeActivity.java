@@ -4,12 +4,16 @@ import android.app.Activity;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 
 import com.baidu.mapapi.SDKInitializer;
+import com.baidu.mapapi.RequestAuthResultListener;
 import com.baidu.mapapi.model.LatLng;
 import com.baidu.mapapi.search.core.BusInfo;
+import com.baidu.mapapi.search.core.SearchResult;
 import com.baidu.mapapi.search.route.MassTransitRouteLine;
 import com.baidu.mapapi.search.route.MassTransitRoutePlanOption;
 import com.baidu.mapapi.search.route.MassTransitRouteResult;
@@ -65,20 +69,56 @@ public class ProbeActivity extends Activity {
     private int caseIndex;
     private boolean walkingPhase;
     private long startMs;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private boolean sdkReady;
+    private boolean authorized;
+    private boolean started;
+    private boolean halted;
+    // 同一进程内 Activity 重建也不能静默再跑一轮；新实验须显式 force-stop 后启动。
+    private static boolean runClaimed;
+
+    private final RequestAuthResultListener authListener = (status, message) ->
+            mainHandler.post(() -> {
+                if (isDestroyed() || isFinishing() || halted) return;
+                // 不输出 message，它可能包含鉴权凭据/设备标识。
+                Log.i(TAG, "鉴权状态=" + status);
+                if (status != 0) {
+                    halted = true;
+                    Log.e(TAG, "鉴权未成功，停止本轮；不发起路线检索、不自动重试。");
+                    return;
+                }
+                authorized = true;
+                startWhenReady();
+            });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // 官方硬门槛：同意隐私必须在 initialize 之前，否则检索直接不可用。
-        SDKInitializer.setAgreePrivacy(this, true);
-        SDKInitializer.initialize(this);
-
         if (configuredAk().isEmpty()) {
             Log.e(TAG, "AK 未配置。构建时传 -PbaiduAk=… 或环境变量 BAIDU_ANDROID_AK。");
             finish();
             return;
         }
+        if (runClaimed) {
+            Log.w(TAG, "本进程已启动过一轮，禁止 Activity 重建自动重跑。");
+            finish();
+            return;
+        }
+        // 官方硬门槛：ApplicationContext；同意隐私在 initialize 之前。
+        SDKInitializer.setAgreePrivacy(getApplicationContext(), true);
+        SDKInitializer.addAuthResultListener(authListener);
+        Log.i(TAG, "等待 SDK 初始化与鉴权完成；尚未发起路线检索。");
+        SDKInitializer.initialize(getApplicationContext(), () -> mainHandler.post(() -> {
+            if (isDestroyed() || isFinishing() || halted) return;
+            sdkReady = true;
+            startWhenReady();
+        }));
+    }
 
+    private void startWhenReady() {
+        if (!sdkReady || !authorized || started || halted || runClaimed) return;
+        started = true;
+        runClaimed = true;
         search = RoutePlanSearch.newInstance();
         search.setOnGetRoutePlanResultListener(listener);
         startNext();
@@ -108,11 +148,13 @@ public class ProbeActivity extends Activity {
         Log.i(TAG, od.id + (walkingPhase ? " walking" : " transit") + " 发起=" + ok);
         if (!ok) {
             // 不自动跳到下一条：无法确定 SDK 是否还会回调，跳了会重复推进队列。
-            Log.e(TAG, "发起失败，队列停在此处。检查 AK/网络后重启探针；已落盘的结果仍有效。");
+            halted = true;
+            Log.e(TAG, "发起失败，队列停在此处；迟到回调只记录，不推进、不自动重试。");
         }
     }
 
     private void advance() {
+        if (halted || isDestroyed() || isFinishing()) return;
         if (walkingPhase) {
             walkingPhase = false;
             caseIndex++;
@@ -136,27 +178,33 @@ public class ProbeActivity extends Activity {
     private final OnGetRoutePlanResultListener listener = new OnGetRoutePlanResultListener() {
         @Override
         public void onGetMassTransitRouteResult(MassTransitRouteResult result) {
-            Od od = CASES[caseIndex];
-            long ms = SystemClock.elapsedRealtime() - startMs;
-            Log.i(TAG, od.id + " transit 延迟=" + ms + "ms error=" + result.error);
-            JSONObject dump = result.error == null
-                    ? transitDump(result)
-                    : rejected(result.error.toString());
-            write("sdk_probe_" + od.id + "_transit.json", dump);
-            logTransitCompleteness(od.id, result);
-            advance();
+            mainHandler.post(() -> {
+                if (isDestroyed() || isFinishing() || walkingPhase || caseIndex >= CASES.length) return;
+                Od od = CASES[caseIndex];
+                long ms = SystemClock.elapsedRealtime() - startMs;
+                Log.i(TAG, od.id + " transit 延迟=" + ms + "ms error=" + result.error);
+                JSONObject dump = result.error == SearchResult.ERRORNO.NO_ERROR
+                        ? transitDump(result)
+                        : rejected(String.valueOf(result.error));
+                write("sdk_probe_" + od.id + "_transit.json", dump);
+                logTransitCompleteness(od.id, result);
+                advance();
+            });
         }
 
         @Override
         public void onGetWalkingRouteResult(WalkingRouteResult result) {
-            Od od = CASES[caseIndex];
-            long ms = SystemClock.elapsedRealtime() - startMs;
-            Log.i(TAG, od.id + " walking 延迟=" + ms + "ms error=" + result.error);
-            JSONObject dump = result.error == null
-                    ? walkingDump(result)
-                    : rejected(result.error.toString());
-            write("sdk_probe_" + od.id + "_walking.json", dump);
-            advance();
+            mainHandler.post(() -> {
+                if (isDestroyed() || isFinishing() || !walkingPhase || caseIndex >= CASES.length) return;
+                Od od = CASES[caseIndex];
+                long ms = SystemClock.elapsedRealtime() - startMs;
+                Log.i(TAG, od.id + " walking 延迟=" + ms + "ms error=" + result.error);
+                JSONObject dump = result.error == SearchResult.ERRORNO.NO_ERROR
+                        ? walkingDump(result)
+                        : rejected(String.valueOf(result.error));
+                write("sdk_probe_" + od.id + "_walking.json", dump);
+                advance();
+            });
         }
 
         @Override public void onGetTransitRouteResult(com.baidu.mapapi.search.route.TransitRouteResult r) { }
@@ -306,7 +354,7 @@ public class ProbeActivity extends Activity {
                 + " 缺首末班=" + missingFirstLast);
         if (lines.isEmpty()) {
             // 对应 Web API 的 status==0 && routes 为空（ADR 0002 A6）。
-            // SDK 用 error==null + 空列表表达，还是用 error 表达，正是要测的点。
+            // SDK 用 NO_ERROR + 空列表表达，还是用错误枚举表达，正是要测的点。
             Log.i(TAG, id + " 无公交方案：error=" + result.error + "（记录 SDK 如何表达空结果）");
         }
     }
@@ -336,6 +384,9 @@ public class ProbeActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        halted = true;
+        SDKInitializer.removeAuthResultListener(authListener);
+        mainHandler.removeCallbacksAndMessages(null);
         if (search != null) search.destroy();
         super.onDestroy();
     }

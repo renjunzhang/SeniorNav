@@ -1,0 +1,374 @@
+import 'package:flutter/material.dart';
+
+import '../../core/contracts.dart';
+import '../places/family_settings_page.dart';
+import '../route/route_page.dart';
+
+const _defaultLabels = ['回家', '去家人家', '医院', '超市'];
+const _slotIcons = [
+  Icons.home_rounded,
+  Icons.favorite_rounded,
+  Icons.local_hospital_rounded,
+  Icons.shopping_cart_rounded,
+];
+const _tileColors = [
+  Color(0xFFE0F3E9),
+  Color(0xFFFFE7EB),
+  Color(0xFFE0EDFF),
+  Color(0xFFFFF0D5),
+  Color(0xFFEBE5FA),
+];
+const _inkColors = [
+  Color(0xFF12623E),
+  Color(0xFFA32046),
+  Color(0xFF1453A1),
+  Color(0xFF805000),
+  Color(0xFF584197),
+];
+
+IconData placeIcon(String name, int slot) => switch (name) {
+  'home' => Icons.home_rounded,
+  'family' || 'favorite' => Icons.favorite_rounded,
+  'hospital' => Icons.local_hospital_rounded,
+  'shop' || 'shopping' || 'supermarket' => Icons.shopping_cart_rounded,
+  'park' => Icons.park_rounded,
+  'restaurant' => Icons.restaurant_rounded,
+  'station' => Icons.train_rounded,
+  'place' => Icons.place_rounded,
+  _ => slot >= 1 && slot <= 4 ? _slotIcons[slot - 1] : Icons.place_rounded,
+};
+
+class HomePage extends StatefulWidget {
+  const HomePage({super.key, required this.services});
+  final AppServices services;
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  DateTime? _lastTitleTap;
+  int _titleTaps = 0;
+  bool _opening = false;
+
+  void _titleTapped() {
+    final now = DateTime.now();
+    if (_lastTitleTap == null ||
+        now.difference(_lastTitleTap!) > const Duration(milliseconds: 1200)) {
+      _titleTaps = 0;
+    }
+    _lastTitleTap = now;
+    if (++_titleTaps == 3) {
+      _titleTaps = 0;
+      _openSettings();
+    }
+  }
+
+  Future<void> _openSettings() async {
+    if (_opening) return;
+    _opening = true;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => FamilySettingsPage(services: widget.services),
+      ),
+    );
+    _opening = false;
+  }
+
+  Future<void> _select(SavedPlace? place) async {
+    if (_opening) return;
+    _opening = true;
+    try {
+      if (place == null) {
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('这个地点还没设置'),
+            content: const Text('请让家人连续点按首页“SeniorNav”标题三次，设置好地点后再出发。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('知道了'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+      if (!widget.services.places.privacyAccepted) {
+        final accepted = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('查询路线前，请先确认'),
+            scrollable: true,
+            content: const Text(
+              '只在你查询路线时获取一次当前位置，并将起点和目的地交给百度地图查询。\n\n常用地点仅保存在这台手机，不持续定位、不记录行踪。请家人协助阅读并确认。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('暂不查询'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('同意并查询'),
+              ),
+            ],
+          ),
+        );
+        if (accepted != true || !mounted) return;
+        try {
+          await widget.services.places.acceptPrivacy();
+        } catch (_) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('未能保存，请稍后再试')));
+          return;
+        }
+      }
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => RoutePage(place: place, services: widget.services),
+        ),
+      );
+    } finally {
+      _opening = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: SafeArea(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: ListenableBuilder(
+            listenable: widget.services.places,
+            builder: (context, _) => LayoutBuilder(
+              builder: (context, constraints) {
+                final textScale = MediaQuery.textScalerOf(context).scale(1);
+                final compact = constraints.maxHeight < 700;
+                final header = _header(compact);
+                final tiles = List<Widget>.generate(5, (index) {
+                  SavedPlace? place;
+                  if (index < 4) {
+                    for (final item in widget.services.places.places) {
+                      if (item.slot == index + 1 && item.deletedAt == null) {
+                        place = item;
+                        break;
+                      }
+                    }
+                  }
+                  final selected = place;
+                  return _HomeTile(
+                    key: ValueKey('home-slot-${index + 1}'),
+                    label: index == 4
+                        ? '更多地点'
+                        : selected?.label ?? _defaultLabels[index],
+                    icon: index == 4
+                        ? Icons.grid_view_rounded
+                        : placeIcon(selected?.icon ?? '', index + 1),
+                    color: _tileColors[index],
+                    inkColor: _inkColors[index],
+                    onTap: index == 4
+                        ? () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => MorePlacesPage(
+                                services: widget.services,
+                                onSelect: _select,
+                              ),
+                            ),
+                          )
+                        : () => _select(selected),
+                  );
+                });
+                // At ordinary text sizes the five slots share the available height.
+                // Large accessibility text may scroll instead of clipping a label.
+                final longLabel = widget.services.places.places.any(
+                  (p) => p.slot > 0 && p.label.length > 10,
+                );
+                final scroll =
+                    textScale > 1.35 ||
+                    constraints.maxHeight < 590 ||
+                    longLabel;
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                  child: scroll
+                      ? SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              header,
+                              const SizedBox(height: 20),
+                              for (var i = 0; i < tiles.length; i++) ...[
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    minHeight: 88,
+                                  ),
+                                  child: tiles[i],
+                                ),
+                                if (i < tiles.length - 1)
+                                  const SizedBox(height: 12),
+                              ],
+                            ],
+                          ),
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            header,
+                            SizedBox(height: compact ? 14 : 24),
+                            for (var i = 0; i < tiles.length; i++) ...[
+                              Expanded(child: tiles[i]),
+                              if (i < tiles.length - 1)
+                                SizedBox(height: compact ? 8 : 12),
+                            ],
+                          ],
+                        ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget _header(bool compact) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      GestureDetector(
+        key: const ValueKey('family-entry'),
+        behavior: HitTestBehavior.opaque,
+        onTap: _titleTapped,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Text(
+            'SeniorNav',
+            style: TextStyle(
+              fontSize: compact ? 28 : 32,
+              fontWeight: FontWeight.w800,
+              color: const Color(0xFF16335B),
+            ),
+          ),
+        ),
+      ),
+      Text(
+        '今天想去哪里？',
+        style: TextStyle(
+          fontSize: compact ? 23 : 28,
+          height: 1.25,
+          fontWeight: FontWeight.w700,
+          color: const Color(0xFF26374F),
+        ),
+      ),
+    ],
+  );
+}
+
+class _HomeTile extends StatelessWidget {
+  const _HomeTile({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.inkColor,
+    required this.onTap,
+  });
+  final String label;
+  final IconData icon;
+  final Color color;
+  final Color inkColor;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    label: label,
+    excludeSemantics: true,
+    onTap: onTap,
+    child: Material(
+      color: color,
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 72),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            child: Row(
+              children: [
+                Icon(icon, size: 34, color: inkColor),
+                const SizedBox(width: 18),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 26,
+                      height: 1.2,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF172A43),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class MorePlacesPage extends StatelessWidget {
+  const MorePlacesPage({
+    super.key,
+    required this.services,
+    required this.onSelect,
+  });
+  final AppServices services;
+  final Future<void> Function(SavedPlace?) onSelect;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      leadingWidth: 80,
+      leading: IconButton(
+        tooltip: '返回',
+        onPressed: () => Navigator.of(context).maybePop(),
+        icon: const Icon(Icons.arrow_back_rounded),
+      ),
+      title: const Text('更多地点'),
+    ),
+    body: ListenableBuilder(
+      listenable: services.places,
+      builder: (context, _) {
+        final places =
+            services.places.places
+                .where((p) => p.slot == 0 && p.deletedAt == null)
+                .toList()
+              ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+        if (places.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.all(28),
+            child: Text('还没有更多地点。\n请让家人在首页连续点按标题三次，添加常去的地方。'),
+          );
+        }
+        return ListView.separated(
+          padding: const EdgeInsets.all(20),
+          itemCount: places.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 14),
+          itemBuilder: (context, index) => _HomeTile(
+            label: places[index].label,
+            icon: placeIcon(places[index].icon, 0),
+            color: const Color(0xFFE0EDFF),
+            inkColor: const Color(0xFF1453A1),
+            onTap: () => onSelect(places[index]),
+          ),
+        );
+      },
+    ),
+  );
+}

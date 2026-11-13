@@ -30,4 +30,5 @@ set -a; . "$PLACES"; set +a
 
 cd app
 exec flutter build apk --debug \
+  --target=lib/m0_probe.dart \
   --dart-define=PROBE_PLACES_JSON="$PROBE_PLACES_JSON"
