@@ -21,3 +21,7 @@ for name in ('BAIDU_MAP_AK', 'BAIDU_MAP_SK', 'BAIDU_AK', 'BAIDU_SK', 'PROBE_PLAC
     env.pop(name, None)
 subprocess.run(['flutter', 'build', 'apk', '--release' if args.release else '--debug',
                 '--target=lib/main.dart'], cwd=root / 'app', env=env, check=True)
+if args.release:
+    # A debug smoke does not cover R8. Reject APKs missing Baidu's native entry points.
+    subprocess.run([sys.executable, str(root / 'tools/check_release_jni.py')],
+                   cwd=root, check=True)

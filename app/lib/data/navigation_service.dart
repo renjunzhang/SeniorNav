@@ -70,13 +70,16 @@ class BaiduNavigationService implements NavigationService {
           destination: place.destination,
           mode: modeName,
           origin: originMyLocation,
-          sy: walking ? null : 0,
+          // Android URI uses different numbers from the SDK's policy 3/5.
+          sy: walking ? null : (mode == RouteMode.metro ? 6 : 4),
         ),
       )) {
         return NavigationOutcome.nativeApp;
       }
     }
     // A real BD-09 origin avoids treating the literal “my location” as a POI on web.
+    // Web policy mapping is unverified. The UI must explain that this transit
+    // fallback may mix bus and metro instead of preserving the selected mode.
     if (await _try(
       webFallback(place.destination, mode: modeName, origin: from),
     )) {

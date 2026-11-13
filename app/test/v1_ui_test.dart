@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:seniornav/core/contracts.dart';
 import 'package:seniornav/features/route/route_page.dart';
@@ -84,6 +85,7 @@ class _Navigation implements NavigationService {
   int calls = 0;
   RouteMode? lastMode;
   GeoPoint? lastOrigin;
+  NavigationOutcome outcome = NavigationOutcome.nativeApp;
   @override
   Future<NavigationOutcome> open(
     SavedPlace place,
@@ -93,7 +95,7 @@ class _Navigation implements NavigationService {
     calls++;
     lastMode = mode;
     lastOrigin = origin;
-    return NavigationOutcome.nativeApp;
+    return outcome;
   }
 
   @override
@@ -101,8 +103,12 @@ class _Navigation implements NavigationService {
       NavigationOutcome.nativeApp;
 }
 
-void _size(WidgetTester tester, {double scale = 1}) {
-  tester.view.physicalSize = const Size(360, 740);
+void _size(
+  WidgetTester tester, {
+  double scale = 1,
+  Size size = const Size(360, 740),
+}) {
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   tester.platformDispatcher.textScaleFactorTestValue = scale;
   addTearDown(tester.view.resetPhysicalSize);
@@ -120,6 +126,70 @@ AppServices _services({
   routes: routes ?? _Routes(),
   navigation: navigation ?? _Navigation(),
 );
+
+Finder _modeFinder(RouteMode mode) =>
+    find.byKey(ValueKey('route-mode-${mode.name}'));
+
+SemanticsProperties _modeSemantics(WidgetTester tester, RouteMode mode) =>
+    tester
+        .widget<Semantics>(
+          find
+              .descendant(
+                of: _modeFinder(mode),
+                matching: find.byType(Semantics),
+              )
+              .first,
+        )
+        .properties;
+
+RouteBundle _threeModes({RouteMode recommended = RouteMode.metro}) {
+  final now = DateTime.now();
+  return RouteBundle(
+    recommendedMode: recommended,
+    fetchedAt: now,
+    metro: RouteSummary(
+      mode: RouteMode.metro,
+      durationSec: 900,
+      distanceM: 5000,
+      fetchedAt: now,
+      legs: const [
+        TransitLeg(
+          lineName: '示例地铁线',
+          lineType: LineType.metro,
+          direction: '公共地标方向',
+          boardStop: '示例上车站',
+          alightStop: '示例下车站',
+          stopCount: 4,
+        ),
+      ],
+    ),
+    transit: RouteSummary(
+      mode: RouteMode.transit,
+      durationSec: 1800,
+      distanceM: 6000,
+      fetchedAt: now,
+      legs: const [
+        TransitLeg(
+          lineName: '示例公交线',
+          lineType: LineType.bus,
+          direction: '公共地标方向',
+          boardStop: '示例公交上车站',
+          alightStop: '示例公交下车站',
+          stopCount: 8,
+        ),
+      ],
+    ),
+    walking: RouteSummary(
+      mode: RouteMode.walking,
+      durationSec: 720,
+      distanceM: 950,
+      fetchedAt: now,
+    ),
+    metroMessage: '这条地铁方案包含公交接驳，请留意换乘。',
+    transitMessage: '这是公交方案提示。',
+    walkingMessage: '这是步行方案提示。',
+  );
+}
 
 void main() {
   testWidgets('1.3 倍字体首页五个入口同时可见且触控高度至少 72', (tester) async {
@@ -358,7 +428,9 @@ void main() {
     _size(tester);
     await tester.pumpWidget(SeniorNavApp(services: _services()));
     await tester.pumpAndSettle();
-    final homeContext = tester.element(find.text('SeniorNav'));
+    final homeContext = tester.element(
+      find.byKey(const ValueKey('family-entry')),
+    );
     expect(Localizations.localeOf(homeContext), const Locale('zh', 'CN'));
     expect(MaterialLocalizations.of(homeContext).cancelButtonLabel, '取消');
     await tester.pumpWidget(StartupFailureApp(onRetry: () async {}));
@@ -366,5 +438,156 @@ void main() {
     final failureContext = tester.element(find.text('暂时无法打开常用地点'));
     expect(Localizations.localeOf(failureContext), const Locale('zh', 'CN'));
     expect(MaterialLocalizations.of(failureContext).backButtonTooltip, '返回');
+  });
+
+  testWidgets('地铁排第一且独立切换三种摘要，推荐和导航方式准确且不重查', (tester) async {
+    _size(tester);
+    final routes = _Routes()..handler = () async => _threeModes();
+    final navigation = _Navigation();
+    await tester.pumpWidget(
+      SeniorNavApp(
+        services: _services(routes: routes, navigation: navigation),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    expect(_modeSemantics(tester, RouteMode.metro).selected, isTrue);
+    expect(_modeSemantics(tester, RouteMode.metro).label, '坐地铁，推荐');
+    expect(
+      tester.getTopLeft(_modeFinder(RouteMode.metro)).dx,
+      lessThan(tester.getTopLeft(_modeFinder(RouteMode.transit)).dx),
+    );
+    expect(find.textContaining('示例地铁线'), findsOneWidget);
+    expect(find.text('这条地铁方案包含公交接驳，请留意换乘。'), findsOneWidget);
+    for (final mode in [
+      RouteMode.metro,
+      RouteMode.transit,
+      RouteMode.walking,
+    ]) {
+      await tester.ensureVisible(_modeFinder(mode));
+      await tester.tap(_modeFinder(mode));
+      await tester.pump();
+      expect(_modeSemantics(tester, mode).selected, isTrue);
+      if (mode == RouteMode.transit) {
+        expect(find.textContaining('示例公交线'), findsOneWidget);
+        expect(find.textContaining('示例地铁线'), findsNothing);
+        expect(find.text('这是公交方案提示。'), findsOneWidget);
+      } else if (mode == RouteMode.walking) {
+        expect(find.textContaining('示例公交线'), findsNothing);
+        expect(find.text('这是步行方案提示。'), findsOneWidget);
+      }
+      await tester.tap(find.byKey(const ValueKey('open-map')));
+      await tester.pumpAndSettle();
+      expect(navigation.lastMode, mode);
+    }
+    expect(routes.calls, 1);
+    expect(navigation.calls, 3);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('地铁空结果显示对应原因，仍可切到有方案的公交', (tester) async {
+    _size(tester);
+    final full = _threeModes();
+    final routes = _Routes()
+      ..handler = () async => RouteBundle(
+        recommendedMode: RouteMode.transit,
+        fetchedAt: full.fetchedAt,
+        transit: full.transit,
+        metroMessage: '附近暂时没有地铁方案。',
+        walkingMessage: '暂时没有步行方案。',
+      );
+    await tester.pumpWidget(SeniorNavApp(services: _services(routes: routes)));
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    expect(_modeSemantics(tester, RouteMode.transit).selected, isTrue);
+    await tester.tap(_modeFinder(RouteMode.metro));
+    await tester.pump();
+    expect(find.text('暂时没有地铁方案'), findsOneWidget);
+    expect(find.text('附近暂时没有地铁方案。'), findsOneWidget);
+    await tester.tap(_modeFinder(RouteMode.walking));
+    await tester.pump();
+    expect(find.text('暂时没有步行方案'), findsOneWidget);
+    expect(find.text('暂时没有步行方案。'), findsOneWidget);
+    await tester.tap(_modeFinder(RouteMode.transit));
+    await tester.pump();
+    expect(find.textContaining('示例公交线'), findsOneWidget);
+    expect(routes.calls, 1);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('加载期间手选公交不会被返回的地铁推荐覆盖', (tester) async {
+    _size(tester);
+    final pending = Completer<RouteBundle>();
+    final routes = _Routes()..handler = () => pending.future;
+    final navigation = _Navigation();
+    await tester.pumpWidget(
+      SeniorNavApp(
+        services: _services(routes: routes, navigation: navigation),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(_modeFinder(RouteMode.transit));
+    await tester.pump();
+    pending.complete(_threeModes());
+    await tester.pumpAndSettle();
+    expect(_modeSemantics(tester, RouteMode.transit).selected, isTrue);
+    expect(_modeSemantics(tester, RouteMode.metro).selected, isFalse);
+    expect(_modeSemantics(tester, RouteMode.metro).label, '坐地铁，推荐');
+    expect(find.textContaining('示例公交线'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('open-map')));
+    await tester.pumpAndSettle();
+    expect(navigation.lastMode, RouteMode.transit);
+    expect(routes.calls, 1);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  for (final scale in [1.3, 2.0]) {
+    testWidgets('窄屏 $scale 倍字体方式标签保持完整，不拆成单字', (tester) async {
+      _size(tester, scale: scale, size: const Size(320, 740));
+      final routes = _Routes()..handler = () async => _threeModes();
+      await tester.pumpWidget(
+        SeniorNavApp(services: _services(routes: routes)),
+      );
+      await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+      await tester.pumpAndSettle();
+      for (final label in ['坐地铁', '坐公交', '走路']) {
+        await tester.ensureVisible(find.text(label));
+        final paragraph = tester.renderObject<RenderParagraph>(
+          find.text(label),
+        );
+        final boxes = paragraph.getBoxesForSelection(
+          TextSelection(baseOffset: 0, extentOffset: label.length),
+        );
+        expect(boxes, isNotEmpty);
+        expect(boxes.map((box) => box.top).toSet(), hasLength(1));
+        expect(
+          boxes.last.right,
+          lessThanOrEqualTo(paragraph.constraints.maxWidth + .1),
+        );
+      }
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const ValueKey('open-map')).hitTestable(),
+        findsOneWidget,
+      );
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
+  testWidgets('网页回退明确要求重新核对出行方式', (tester) async {
+    _size(tester);
+    final navigation = _Navigation()..outcome = NavigationOutcome.web;
+    await tester.pumpWidget(
+      SeniorNavApp(services: _services(navigation: navigation)),
+    );
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(_modeFinder(RouteMode.metro));
+    await tester.tap(find.byKey(const ValueKey('open-map')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('网页未必保留当前选择，请重新核对起点和出行方式'), findsOneWidget);
+    expect(navigation.lastMode, RouteMode.metro);
+    await tester.pumpWidget(const SizedBox());
   });
 }

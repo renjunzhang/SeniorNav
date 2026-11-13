@@ -5,7 +5,6 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:seniornav/core/contracts.dart';
-import 'package:seniornav/baidu_route_parser.dart';
 import 'package:seniornav/data/baidu_client.dart';
 import 'package:seniornav/data/navigation_service.dart';
 import 'package:seniornav/data/route_service.dart';
@@ -24,6 +23,30 @@ SavedPlace samplePlace() => SavedPlace(
   updatedAt: DateTime(2026),
   verifiedAt: DateTime(2026),
 );
+
+String ridePayload(List<List<int>> routes) => jsonEncode({
+  'status': 0,
+  'result': {
+    'routes': [
+      for (var i = 0; i < routes.length; i++)
+        {
+          'duration': 600 + i * 60,
+          'distance': 3000,
+          'steps': [
+            for (final type in routes[i])
+              [
+                {
+                  'trans_type': 1,
+                  'vehicle_info': {
+                    'detail': {'name': '公共测试线路', 'type': type},
+                  },
+                },
+              ],
+          ],
+        },
+    ],
+  },
+});
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -86,7 +109,7 @@ void main() {
       expect(calls, ['initialize', 'transit']);
       firstCallback.complete('{"status":0,"result":{"routes":[]}}');
       final bundle = await result;
-      expect(calls, ['initialize', 'transit', 'walking']);
+      expect(calls, ['initialize', 'transit', 'transit', 'walking']);
       expect(routes.busy, isFalse);
       expect(bundle.transit, isNull);
       expect(bundle.walking, isNotNull);
@@ -128,91 +151,177 @@ void main() {
         invoke: (method, args) async {
           calls.add(method);
           if (method == 'initialize') return null;
-          return File('test/fixtures/metro_direct_$method.json')
-              .readAsStringSync();
+          final fixture = method == 'transit' && args?['policy'] == 3
+              ? 'bus_transfer_transit'
+              : 'metro_direct_$method';
+          return File('test/fixtures/$fixture.json').readAsStringSync();
         },
       );
       final bundle = await SdkRouteService(
         client,
         location: () async => const GeoPoint(31.8, 117.3),
       ).load(samplePlace());
-      expect(calls, ['initialize', 'transit', 'walking']);
-      expect(bundle.transit!.legs.first.direction, isNotEmpty);
+      expect(calls, ['initialize', 'transit', 'transit', 'walking']);
+      expect(bundle.metro!.legs.first.direction, isNotEmpty);
+      expect(
+        bundle.metro!.legs.any((leg) => leg.lineType == LineType.metro),
+        isTrue,
+      );
+      expect(
+        bundle.transit!.legs.every((leg) => leg.lineType == LineType.bus),
+        isTrue,
+      );
       expect(bundle.walking, isNotNull);
     },
   );
 
-  test('alternate-policy timeout preserves both completed routes and keeps the lock', () async {
-    final fixture = jsonDecode(
-      File('test/fixtures/metro_direct_transit.json').readAsStringSync(),
-    ) as Map<String, dynamic>;
-    final options = fixture['result']['routes'] as List;
-    final oneTransfer = options.firstWhere((route) {
-      final parsed = parseTransit({
-        'status': 0,
-        'result': {
-          'routes': [route],
+  test(
+    'bus query timeout preserves metro and does not start walking',
+    () async {
+      final calls = <String>[];
+      final client = BaiduClient(
+        privacyAccepted: () => true,
+        invoke: (method, args) async {
+          calls.add(method);
+          if (method == 'initialize') return null;
+          if (args?['policy'] == 3) {
+            throw PlatformException(code: 'SESSION_BLOCKED');
+          }
+          return ridePayload([
+            [1],
+          ]);
         },
-      }, fetchedAt: DateTime(2026)) as RouteParsed;
-      return parsed.routes.single.transfers >= 1;
-    });
+      );
+      final service = SdkRouteService(
+        client,
+        location: () async => const GeoPoint(31.8, 117.3),
+      );
+      final bundle = await service.load(samplePlace());
+      expect(bundle.metro, isNotNull);
+      expect(bundle.transit, isNull);
+      expect(bundle.walking, isNull);
+      expect(bundle.metroMessage, contains('保留'));
+      expect(client.busy, isTrue);
+      await expectLater(
+        service.load(samplePlace()),
+        throwsA(isA<AppFailure>()),
+      );
+      expect(calls, ['initialize', 'transit', 'transit']);
+    },
+  );
+
+  test(
+    'walking timeout preserves both completed ride modes without retry',
+    () async {
+      final calls = <String>[];
+      final client = BaiduClient(
+        privacyAccepted: () => true,
+        invoke: (method, args) async {
+          calls.add(method);
+          if (method == 'initialize') return null;
+          if (method == 'walking') {
+            throw PlatformException(code: 'SESSION_BLOCKED');
+          }
+          return ridePayload([
+            [args?['policy'] == 5 ? 1 : 0],
+          ]);
+        },
+      );
+      final bundle = await SdkRouteService(
+        client,
+        location: () async => const GeoPoint(31.8, 117.3),
+      ).load(samplePlace());
+      expect(bundle.metro, isNotNull);
+      expect(bundle.transit, isNotNull);
+      expect(bundle.walking, isNull);
+      expect(client.busy, isTrue);
+      expect(calls, ['initialize', 'transit', 'transit', 'walking']);
+    },
+  );
+
+  test('three policies run serially with at most one native request', () async {
     final calls = <String>[];
-    var transitCalls = 0;
+    var active = 0;
+    var maximum = 0;
     final client = BaiduClient(
       privacyAccepted: () => true,
       invoke: (method, args) async {
-        calls.add(method);
         if (method == 'initialize') return null;
+        calls.add('$method:${args?['policy']}');
+        active++;
+        if (active > maximum) maximum = active;
+        await Future<void>.delayed(Duration.zero);
+        active--;
         if (method == 'walking') {
           return File('test/fixtures/metro_direct_walking.json')
               .readAsStringSync();
         }
-        if (++transitCalls == 2) {
-          throw PlatformException(code: 'SESSION_BLOCKED');
-        }
-        return jsonEncode({
-          'status': 0,
-          'result': {
-            'routes': [oneTransfer],
-          },
-        });
-      },
-    );
-    final service = SdkRouteService(
-      client,
-      location: () async => const GeoPoint(31.8, 117.3),
-    );
-    final bundle = await service.load(samplePlace());
-    expect(bundle.transit, isNotNull);
-    expect(bundle.walking, isNotNull);
-    expect(bundle.transitMessage, contains('保留'));
-    expect(client.busy, isTrue);
-    await expectLater(service.load(samplePlace()), throwsA(isA<AppFailure>()));
-    expect(calls, ['initialize', 'transit', 'walking', 'transit']);
-  });
-
-  test('walking timeout keeps an already successful transit route without further calls', () async {
-    final calls = <String>[];
-    final client = BaiduClient(
-      privacyAccepted: () => true,
-      invoke: (method, args) async {
-        calls.add(method);
-        if (method == 'initialize') return null;
-        if (method == 'walking') {
-          throw PlatformException(code: 'SESSION_BLOCKED');
-        }
-        return File('test/fixtures/metro_direct_transit.json')
-            .readAsStringSync();
+        // Both policies can return alternatives: classify actual legs, not the policy name.
+        return ridePayload([
+          [0],
+          [1],
+          [1, 0],
+          [0, 9],
+          [],
+        ]);
       },
     );
     final bundle = await SdkRouteService(
       client,
       location: () async => const GeoPoint(31.8, 117.3),
     ).load(samplePlace());
-    expect(bundle.transit, isNotNull);
-    expect(bundle.walking, isNull);
-    expect(client.busy, isTrue);
-    expect(calls, ['initialize', 'transit', 'walking']);
+    expect(calls, ['transit:5', 'transit:3', 'walking:null']);
+    expect(maximum, 1);
+    expect(bundle.metro!.mode, RouteMode.metro);
+    expect(bundle.metro!.legs.single.lineType, LineType.metro);
+    expect(bundle.transit!.legs.single.lineType, LineType.bus);
+    expect(bundle.walking, isNotNull);
+  });
+
+  test('mixed metro warns about bus connections and unknown rides never become bus', () async {
+    final client = BaiduClient(
+      privacyAccepted: () => true,
+      invoke: (method, args) async {
+        if (method == 'initialize') return null;
+        if (method == 'walking') return '{"status":0,"result":{"routes":[]}}';
+        return args?['policy'] == 5
+            ? ridePayload([
+                [1, 0],
+              ])
+            : ridePayload([
+                [1],
+                [0, 9],
+                [9],
+              ]);
+      },
+    );
+    final bundle = await SdkRouteService(
+      client,
+      location: () async => const GeoPoint(31.8, 117.3),
+    ).load(samplePlace());
+    expect(bundle.metro, isNotNull);
+    expect(bundle.metroMessage, contains('公交接驳'));
+    expect(bundle.transit, isNull);
+    expect(bundle.transitMessage, contains('符合条件'));
+    expect(bundle.recommendedMode, RouteMode.metro);
+  });
+
+  test('native metro and bus navigation use separate URI policies', () async {
+    final opened = <Uri>[];
+    final navigation = BaiduNavigationService(
+      installed: () async => true,
+      opener: (uri) async {
+        opened.add(uri);
+        return true;
+      },
+    );
+    await navigation.open(samplePlace(), RouteMode.metro);
+    await navigation.open(samplePlace(), RouteMode.transit);
+    expect(opened.map((uri) => uri.queryParameters['sy']), ['6', '4']);
+    expect(
+      opened.every((uri) => uri.queryParameters['mode'] == 'transit'),
+      isTrue,
+    );
   });
 
   test('native transit navigation uses current location instead of an old summary origin', () async {

@@ -192,7 +192,7 @@ internal object BaiduBridge {
         val from = point(call, "from")
         val to = point(call, "to")
         val policy = call.argument<Number>("policy")?.toInt() ?: 0
-        require(policy == 0 || policy == 1)
+        require(policy == 0 || policy == 1 || policy == 3 || policy == 5)
         val request = begin(reply) ?: return
         val search = RoutePlanSearch.newInstance()
         request.destroy = { search.destroy() }
@@ -214,8 +214,13 @@ internal object BaiduBridge {
             override fun onGetIntegralRouteResult(r: IntegralRouteResult) = Unit
         })
         val ok = if (call.method == "transit") {
-            val tactics = if (policy == 1) MassTransitRoutePlanOption.TacticsIncity.ETRANS_LEAST_TRANSFER
-                else MassTransitRoutePlanOption.TacticsIncity.ETRANS_SUGGEST
+            // SDK policy values differ from Android URI sy (no subway=4, subway first=6).
+            val tactics = when (policy) {
+                1 -> MassTransitRoutePlanOption.TacticsIncity.ETRANS_LEAST_TRANSFER
+                3 -> MassTransitRoutePlanOption.TacticsIncity.ETRANS_NO_SUBWAY
+                5 -> MassTransitRoutePlanOption.TacticsIncity.ETRANS_SUBWAY_FIRST
+                else -> MassTransitRoutePlanOption.TacticsIncity.ETRANS_SUGGEST
+            }
             search.masstransitSearch(MassTransitRoutePlanOption().from(PlanNode.withLocation(from))
                 .to(PlanNode.withLocation(to)).coordType("bd09ll").tacticsIncity(tactics))
         } else {
@@ -249,14 +254,26 @@ internal object BaiduBridge {
                 val segments = JSONArray()
                 for (step in group) {
                     val bus = step.busInfo
-                    val vehicle = JSONObject().put("type", if (bus == null) 5 else 3)
-                    val detail = if (bus == null) JSONObject.NULL else JSONObject()
-                        .put("name", text(bus.name)).put("type", bus.type)
-                        .put("direct_text", text(bus.directText))
-                        .put("on_station", text(bus.departureStation)).put("off_station", text(bus.arriveStation))
-                        .put("stop_num", bus.stopNum)
-                        // SDK's departure/arriveTime here are first/last service time, not trip arrival.
-                        .put("first_time", text(bus.departureTime)).put("last_time", text(bus.arriveTime))
+                    val kind = step.vehileType
+                    val otherVehicle = step.trainInfo != null || step.planeInfo != null || step.coachInfo != null
+                    val walkingOrTransfer = !otherVehicle && bus == null &&
+                        (kind == MassTransitRouteLine.TransitStep.StepVehicleInfoType.ESTEP_WALK || kind == null) &&
+                        (step.transType == 0 || step.transType == 3 || step.transType == 4)
+                    val vehicle = JSONObject().put("type", kind?.getInt() ?: -1)
+                    val detail: Any = when {
+                        bus != null && !otherVehicle -> JSONObject()
+                            .put("name", text(bus.name)).put("type", bus.type)
+                            .put("direct_text", text(bus.directText))
+                            .put("on_station", text(bus.departureStation)).put("off_station", text(bus.arriveStation))
+                            .put("stop_num", bus.stopNum)
+                            // These SDK times describe first/last service, not trip arrival.
+                            .put("first_time", text(bus.departureTime)).put("last_time", text(bus.arriveTime))
+                        walkingOrTransfer -> JSONObject.NULL
+                        // Keep unsupported/malformed riding segments visible to Dart's classifier.
+                        // A null detail would silently erase trains/coaches/planes and could make
+                        // a mixed route appear to be entirely bus or metro.
+                        else -> JSONObject().put("type", -1).put("name", JSONObject.NULL)
+                    }
                     vehicle.put("detail", detail)
                     segments.put(JSONObject().put("trans_type", step.transType).put("distance", step.distance)
                         .put("instructions", text(step.instructions)).put("vehicle_info", vehicle))

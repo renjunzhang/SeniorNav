@@ -54,10 +54,10 @@ Future<void> main() async {
       client,
       location: () async => const GeoPoint(31.805, 117.297),
     ).load(destination);
-    if (result.transit == null || result.walking == null) {
+    if (result.metro == null || result.transit == null || result.walking == null) {
       throw const AppFailure('公共路线未完整返回');
     }
-    final complete = result.transit!.legs.every(
+    final complete = [...result.metro!.legs, ...result.transit!.legs].every(
       (leg) =>
           leg.direction != null &&
           leg.boardStop != null &&
@@ -65,7 +65,7 @@ Future<void> main() async {
           leg.stopCount != null,
     );
     debugPrint(
-      'SENIORNAV_SMOKE routes=ok transitLegs=${result.transit!.legs.length} fields=$complete',
+      'SENIORNAV_SMOKE routes=ok metroLegs=${result.metro!.legs.length} busLegs=${result.transit!.legs.length} fields=$complete',
     );
     debugPrint('SENIORNAV_SMOKE DONE calls=$calls blocked=${client.blocked}');
   } catch (_) {

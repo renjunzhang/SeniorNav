@@ -70,66 +70,91 @@ class SdkRouteService implements RouteService {
       'toLat': destination.latitude,
       'toLng': destination.longitude,
     };
-    // Never replace these awaits with Future.wait. POI shares the same lock.
-    final transitResult = parseTransit(
-      _json(await session.call('transit', {...args, 'policy': 0})),
-      fetchedAt: at,
-    );
-    var transit = _selected(transitResult);
-    RouteParseResult walkingResult;
-    var walkingFailed = false;
-    try {
-      walkingResult = parseWalking(
-        _json(await session.call('walking', args)),
-        fetchedAt: at,
-      );
-    } on AppFailure {
-      if (transit == null) rethrow;
-      walkingFailed = true;
-      walkingResult = const RouteRejected(-1, 'WALKING_UNAVAILABLE');
-    }
-    final walking = _selected(walkingResult);
-    var transitMessage = _message(transitResult, '公交');
-    if (transit != null &&
-        transit.transfers >= 1 &&
-        !walkingFailed &&
-        !client.blocked) {
-      // One alternate-policy query after both callbacks; never a network retry.
+    // One operation lock, at most three distinct queries, always awaited in order.
+    // A UI timeout must not free the native slot. Never retry an uncertain request.
+    final results = <RouteMode, RouteParseResult>{};
+    final messages = <RouteMode, String>{};
+    AppFailure? firstFailure;
+    for (final mode in [
+      RouteMode.metro,
+      RouteMode.transit,
+      RouteMode.walking,
+    ]) {
+      if (client.blocked) {
+        messages[mode] = '上一条查询尚未确认结束，未继续查询，请打开百度地图。';
+        continue;
+      }
       try {
-        final alternative = parseTransit(
-          _json(await session.call('transit', {...args, 'policy': 1})),
-          fetchedAt: at,
-        );
-        if (alternative case RouteParsed(:final routes)) {
-          transit = selectRoute([
-            ...(transitResult as RouteParsed).routes,
-            ...routes,
-          ]);
-        } else if (alternative is RouteRejected ||
-            alternative is RouteMalformed) {
-          transitMessage = '少换乘方案暂时查不到，下面保留已查到的路线。';
-        }
-      } on AppFailure {
-        transitMessage = '少换乘查询未完成，下面保留已查到的路线，请以百度地图为准。';
+        final walking = mode == RouteMode.walking;
+        final raw = await session.call(walking ? 'walking' : 'transit', {
+          ...args,
+          if (!walking) 'policy': mode == RouteMode.metro ? 5 : 3,
+        });
+        results[mode] = walking
+            ? parseWalking(_json(raw), fetchedAt: at)
+            : parseTransit(_json(raw), fetchedAt: at, mode: mode);
+      } on AppFailure catch (error) {
+        firstFailure ??= error;
+        messages[mode] = error.message;
       }
     }
+    final metro = _ride(results[RouteMode.metro], metro: true);
+    final transit = _ride(results[RouteMode.transit], metro: false);
+    final walking = _selected(results[RouteMode.walking]);
+    if (client.blocked && metro == null && transit == null && walking == null) {
+      throw firstFailure ?? const AppFailure('查询尚未确认结束，请打开百度地图。');
+    }
+    final rides = [?metro, ?transit];
+    final ride = rides.isEmpty ? null : selectRoute(rides);
     final advice = walking == null
         ? null
-        : recommendMode(transit: transit, walking: walking);
+        : recommendMode(transit: ride, walking: walking);
+    final recommendedMode = walking != null && advice != ModeAdvice.transit
+        ? RouteMode.walking
+        : ride?.mode ?? RouteMode.metro;
+
+    String? message(RouteMode mode, RouteSummary? route, String label) {
+      final parts = <String>[
+        if (messages[mode] != null) messages[mode]!,
+        if (route == null && messages[mode] == null)
+          _message(results[mode], label) ?? '暂时没有符合条件的$label方案，请打开百度地图核对。',
+        if (route != null && client.blocked) '后续查询未完成，已保留这条路线，请以百度地图为准。',
+        if (mode == RouteMode.metro &&
+            route != null &&
+            route.legs.any((leg) => leg.lineType == LineType.bus))
+          '这条地铁路线还需要坐公交接驳，请留意换乘。',
+        if (mode == RouteMode.walking && advice == ModeAdvice.walkFarWarning)
+          '步行距离较远，出发前请让家人协助确认。',
+      ];
+      return parts.isEmpty ? null : parts.join('\n');
+    }
+
     return RouteBundle(
-      recommendedMode: advice == ModeAdvice.transit || walking == null
-          ? RouteMode.transit
-          : RouteMode.walking,
+      recommendedMode: recommendedMode,
       fetchedAt: at,
       origin: origin,
+      metro: metro,
       transit: transit,
       walking: walking,
-      transitMessage: transitMessage,
-      walkingMessage: advice == ModeAdvice.walkFarWarning
-          ? '步行距离较远，出发前请让家人协助确认。'
-          : _message(walkingResult, '步行'),
+      metroMessage: message(RouteMode.metro, metro, '地铁'),
+      transitMessage: message(RouteMode.transit, transit, '公交'),
+      walkingMessage: message(RouteMode.walking, walking, '步行'),
     );
   });
+
+  static RouteSummary? _ride(RouteParseResult? result, {required bool metro}) {
+    if (result is! RouteParsed) return null;
+    final candidates = result.routes.where((route) {
+      if (route.legs.isEmpty ||
+          route.legs.any((leg) => leg.lineType == LineType.unknown)) {
+        return false;
+      }
+      return metro
+          ? route.legs.any((leg) => leg.lineType == LineType.metro)
+          : route.legs.every((leg) => leg.lineType == LineType.bus);
+    }).toList();
+    return candidates.isEmpty ? null : selectRoute(candidates);
+  }
 
   static Map<String, dynamic> _json(Object? raw) {
     try {
@@ -141,11 +166,11 @@ class SdkRouteService implements RouteService {
     throw const AppFailure('路线信息暂时无法读取，请打开百度地图。');
   }
 
-  static RouteSummary? _selected(RouteParseResult result) => switch (result) {
+  static RouteSummary? _selected(RouteParseResult? result) => switch (result) {
     RouteParsed(:final routes) => routes.isEmpty ? null : selectRoute(routes),
     _ => null,
   };
-  static String? _message(RouteParseResult result, String mode) =>
+  static String? _message(RouteParseResult? result, String mode) =>
       switch (result) {
         RouteEmpty() => '没有查到$mode路线，可以切换出行方式或打开百度地图。',
         RouteParsed() => null,

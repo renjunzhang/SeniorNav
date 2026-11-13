@@ -96,16 +96,22 @@ class RouteBundle {
     required this.recommendedMode,
     required this.fetchedAt,
     this.origin,
+    this.metro,
     this.transit,
     this.walking,
+    this.metroMessage,
     this.transitMessage,
     this.walkingMessage,
   });
   final RouteMode recommendedMode;
   final DateTime fetchedAt;
   final GeoPoint? origin;
+  final RouteSummary? metro;
+
+  /// Bus-only option; the historic `transit` name is retained for callers.
   final RouteSummary? transit;
   final RouteSummary? walking;
+  final String? metroMessage;
   final String? transitMessage;
   final String? walkingMessage;
 }

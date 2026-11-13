@@ -9,7 +9,8 @@ library;
 import 'dart:math';
 
 /// 出行方式。
-enum RouteMode { transit, walking }
+// `transit` is the bus option; metro is selected separately.
+enum RouteMode { metro, transit, walking }
 
 /// 线路类型。取自 `vehicle_info.detail.type`，实测 0 = 普通公交、1 = 地铁/轻轨。
 enum LineType {
@@ -107,7 +108,7 @@ class RouteSummary {
   /// 免得两处各算一遍算出不同的值。
   int get transfers => legs.isEmpty ? 0 : legs.length - 1;
 
-  bool get isTransit => mode == RouteMode.transit;
+  bool get isTransit => mode != RouteMode.walking;
 
   /// §4.4：摘要页显示查询时间，超过 5 分钟提示重新查询。
   bool isStaleAt(DateTime now, {Duration threshold = const Duration(minutes: 5)}) =>

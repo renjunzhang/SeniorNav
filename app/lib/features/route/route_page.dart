@@ -1,9 +1,28 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../core/contracts.dart';
 import '../../route_summary.dart';
+
+String _modeLabel(RouteMode mode) => switch (mode) {
+  RouteMode.metro => '坐地铁',
+  RouteMode.transit => '坐公交',
+  RouteMode.walking => '走路',
+};
+
+String _modeName(RouteMode mode) => switch (mode) {
+  RouteMode.metro => '地铁',
+  RouteMode.transit => '公交',
+  RouteMode.walking => '步行',
+};
+
+IconData _modeIcon(RouteMode mode) => switch (mode) {
+  RouteMode.metro => Icons.subway_rounded,
+  RouteMode.transit => Icons.directions_bus_rounded,
+  RouteMode.walking => Icons.directions_walk_rounded,
+};
 
 class RoutePage extends StatefulWidget {
   const RoutePage({super.key, required this.place, required this.services});
@@ -16,7 +35,8 @@ class RoutePage extends StatefulWidget {
 
 class _RoutePageState extends State<RoutePage> {
   RouteBundle? _bundle;
-  RouteMode _mode = RouteMode.transit;
+  RouteMode _mode = RouteMode.metro;
+  bool _modeSelectedDuringLoad = false;
   bool _loading = false;
   bool _slow = false;
   bool _openingMap = false;
@@ -67,6 +87,7 @@ class _RoutePageState extends State<RoutePage> {
     }
     setState(() {
       _loading = true;
+      _modeSelectedDuringLoad = false;
       _slow = false;
       _error = null;
       _bundle = null;
@@ -82,7 +103,7 @@ class _RoutePageState extends State<RoutePage> {
       if (!mounted) return;
       setState(() {
         _bundle = result;
-        _mode = result.recommendedMode;
+        if (!_modeSelectedDuringLoad) _mode = result.recommendedMode;
       });
     } catch (error) {
       if (!mounted) return;
@@ -93,6 +114,13 @@ class _RoutePageState extends State<RoutePage> {
       _slowTimer?.cancel();
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _selectMode(RouteMode mode) {
+    setState(() {
+      _mode = mode;
+      if (_loading) _modeSelectedDuringLoad = true;
+    });
   }
 
   Future<void> _openMap() async {
@@ -111,7 +139,8 @@ class _RoutePageState extends State<RoutePage> {
       if (!mounted) return;
       final message = switch (outcome) {
         NavigationOutcome.nativeApp => null,
-        NavigationOutcome.web => '已打开网页版。如需选择起点，请让家人协助；也可在手机应用商店安装或更新百度地图。',
+        NavigationOutcome.web =>
+          '网页未必保留当前选择，请重新核对起点和出行方式。如需帮助，请让家人协助；也可在手机应用商店安装或更新百度地图。',
         NavigationOutcome.unavailable => '暂时无法打开地图。请让家人在手机应用商店安装或更新百度地图后再试。',
       };
       if (message != null) {
@@ -159,12 +188,16 @@ class _RoutePageState extends State<RoutePage> {
   @override
   Widget build(BuildContext context) {
     final bundle = _bundle;
-    final route = _mode == RouteMode.transit
-        ? bundle?.transit
-        : bundle?.walking;
-    final modeMessage = _mode == RouteMode.transit
-        ? bundle?.transitMessage
-        : bundle?.walkingMessage;
+    final route = switch (_mode) {
+      RouteMode.metro => bundle?.metro,
+      RouteMode.transit => bundle?.transit,
+      RouteMode.walking => bundle?.walking,
+    };
+    final modeMessage = switch (_mode) {
+      RouteMode.metro => bundle?.metroMessage,
+      RouteMode.transit => bundle?.transitMessage,
+      RouteMode.walking => bundle?.walkingMessage,
+    };
     final now = DateTime.now();
     final summary = route == null ? null : renderSummary(route, now: now);
     return Scaffold(
@@ -199,33 +232,10 @@ class _RoutePageState extends State<RoutePage> {
                           ),
                         ),
                         const SizedBox(height: 18),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: _ModeButton(
-                                mode: RouteMode.transit,
-                                selected: _mode == RouteMode.transit,
-                                recommended:
-                                    bundle?.recommendedMode ==
-                                    RouteMode.transit,
-                                onTap: () =>
-                                    setState(() => _mode = RouteMode.transit),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _ModeButton(
-                                mode: RouteMode.walking,
-                                selected: _mode == RouteMode.walking,
-                                recommended:
-                                    bundle?.recommendedMode ==
-                                    RouteMode.walking,
-                                onTap: () =>
-                                    setState(() => _mode = RouteMode.walking),
-                              ),
-                            ),
-                          ],
+                        _ModeChoices(
+                          selectedMode: _mode,
+                          recommendedMode: bundle?.recommendedMode,
+                          onSelect: _selectMode,
                         ),
                         const SizedBox(height: 20),
                         if (_loading)
@@ -263,11 +273,8 @@ class _RoutePageState extends State<RoutePage> {
                           ],
                         ] else
                           _NoticeCard(
-                            icon: _mode == RouteMode.transit
-                                ? Icons.directions_bus_rounded
-                                : Icons.directions_walk_rounded,
-                            title:
-                                '暂时没有${_mode == RouteMode.transit ? '公交' : '步行'}方案',
+                            icon: _modeIcon(_mode),
+                            title: '暂时没有${_modeName(_mode)}方案',
                             message: modeMessage ?? '可以切换出行方式，或打开百度地图查看。',
                           ),
                         if (bundle != null) ...[
@@ -347,8 +354,70 @@ class _RoutePageState extends State<RoutePage> {
       '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
 }
 
+class _ModeChoices extends StatelessWidget {
+  const _ModeChoices({
+    required this.selectedMode,
+    required this.recommendedMode,
+    required this.onSelect,
+  });
+
+  final RouteMode selectedMode;
+  final RouteMode? recommendedMode;
+  final ValueChanged<RouteMode> onSelect;
+
+  static const _modes = [RouteMode.metro, RouteMode.transit, RouteMode.walking];
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      // Wrap whole choices, never individual Chinese characters. Larger system
+      // fonts naturally move from three columns to two rows or a single column.
+      var labelWidth = 0.0;
+      for (final mode in _modes) {
+        final painter = TextPainter(
+          text: TextSpan(
+            text: _modeLabel(mode),
+            style: DefaultTextStyle.of(context).style.merge(
+              const TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
+            ),
+          ),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+          maxLines: 1,
+        )..layout();
+        labelWidth = math.max(labelWidth, painter.width);
+        painter.dispose();
+      }
+      const gap = 12.0;
+      final minimumWidth = labelWidth + 24;
+      final columns = ((constraints.maxWidth + gap) / (minimumWidth + gap))
+          .floor()
+          .clamp(1, 3);
+      final width = (constraints.maxWidth - (columns - 1) * gap) / columns;
+      return Wrap(
+        spacing: gap,
+        runSpacing: gap,
+        children: [
+          for (var index = 0; index < _modes.length; index++)
+            SizedBox(
+              width: columns == 2 && index == 2 ? constraints.maxWidth : width,
+              child: _ModeButton(
+                key: ValueKey('route-mode-${_modes[index].name}'),
+                mode: _modes[index],
+                selected: selectedMode == _modes[index],
+                recommended: recommendedMode == _modes[index],
+                onTap: () => onSelect(_modes[index]),
+              ),
+            ),
+        ],
+      );
+    },
+  );
+}
+
 class _ModeButton extends StatelessWidget {
   const _ModeButton({
+    super.key,
     required this.mode,
     required this.selected,
     required this.recommended,
@@ -363,8 +432,7 @@ class _ModeButton extends StatelessWidget {
   Widget build(BuildContext context) => Semantics(
     button: true,
     selected: selected,
-    label:
-        '${mode == RouteMode.transit ? '坐公交' : '走路'}${recommended ? '，推荐' : ''}',
+    label: '${_modeLabel(mode)}${recommended ? '，推荐' : ''}',
     excludeSemantics: true,
     onTap: onTap,
     child: Material(
@@ -387,8 +455,10 @@ class _ModeButton extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  mode == RouteMode.transit ? '坐公交' : '走路',
+                  _modeLabel(mode),
                   textAlign: TextAlign.center,
+                  maxLines: 1,
+                  softWrap: false,
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.w700,

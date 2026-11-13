@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../core/contracts.dart';
@@ -5,6 +7,18 @@ import '../places/family_settings_page.dart';
 import '../route/route_page.dart';
 
 const _defaultLabels = ['回家', '去家人家', '医院', '超市'];
+const _tileLabelStyle = TextStyle(
+  fontSize: 30,
+  height: 1.2,
+  fontWeight: FontWeight.w700,
+  color: Color(0xFF172A43),
+);
+const _headerStyle = TextStyle(
+  fontSize: 26,
+  height: 1.2,
+  fontWeight: FontWeight.w600,
+  color: Color(0xFF53657D),
+);
 const _slotIcons = [
   Icons.home_rounded,
   Icons.favorite_rounded,
@@ -84,7 +98,7 @@ class _HomePageState extends State<HomePage> {
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('这个地点还没设置'),
-            content: const Text('请让家人连续点按首页“SeniorNav”标题三次，设置好地点后再出发。'),
+            content: const Text('请让家人连续点按首页顶部“回家”标题三次，设置好地点后再出发。'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -148,9 +162,8 @@ class _HomePageState extends State<HomePage> {
             builder: (context, _) => LayoutBuilder(
               builder: (context, constraints) {
                 final textScale = MediaQuery.textScalerOf(context).scale(1);
-                final compact = constraints.maxHeight < 700;
-                final header = _header(compact);
-                final tiles = List<Widget>.generate(5, (index) {
+                final header = _header();
+                final tiles = List<_HomeTile>.generate(5, (index) {
                   SavedPlace? place;
                   if (index < 4) {
                     for (final item in widget.services.places.places) {
@@ -183,24 +196,45 @@ class _HomePageState extends State<HomePage> {
                         : () => _select(selected),
                   );
                 });
-                // At ordinary text sizes the five slots share the available height.
-                // Large accessibility text may scroll instead of clipping a label.
-                final longLabel = widget.services.places.places.any(
-                  (p) => p.slot > 0 && p.label.length > 10,
+                // Share remaining space at ordinary text sizes. Measure the
+                // actual labels so narrow screens and long names can scroll
+                // rather than squeezing text into an undersized fixed slot.
+                final labelWidth = math.max(1.0, constraints.maxWidth - 138);
+                final minTileHeight = tiles.fold<double>(80, (height, tile) {
+                  return math.max(
+                    height,
+                    _textHeight(
+                          context,
+                          tile.label,
+                          _tileLabelStyle,
+                          labelWidth,
+                        ) +
+                        24,
+                  );
+                });
+                final headerHeight = math.max(
+                  56.0,
+                  _textHeight(
+                        context,
+                        '回家',
+                        _headerStyle,
+                        math.max(1.0, constraints.maxWidth - 40),
+                      ) +
+                      16,
                 );
+                final availableTileHeight =
+                    (constraints.maxHeight - 28 - headerHeight - 12 - 48) / 5;
                 final scroll =
-                    textScale > 1.35 ||
-                    constraints.maxHeight < 590 ||
-                    longLabel;
+                    textScale > 1.35 || availableTileHeight < minTileHeight;
                 return Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
                   child: scroll
                       ? SingleChildScrollView(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               header,
-                              const SizedBox(height: 20),
+                              const SizedBox(height: 12),
                               for (var i = 0; i < tiles.length; i++) ...[
                                 ConstrainedBox(
                                   constraints: const BoxConstraints(
@@ -218,11 +252,11 @@ class _HomePageState extends State<HomePage> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             header,
-                            SizedBox(height: compact ? 14 : 24),
+                            const SizedBox(height: 12),
                             for (var i = 0; i < tiles.length; i++) ...[
                               Expanded(child: tiles[i]),
                               if (i < tiles.length - 1)
-                                SizedBox(height: compact ? 8 : 12),
+                                const SizedBox(height: 12),
                             ],
                           ],
                         ),
@@ -235,35 +269,35 @@ class _HomePageState extends State<HomePage> {
     ),
   );
 
-  Widget _header(bool compact) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      GestureDetector(
-        key: const ValueKey('family-entry'),
-        behavior: HitTestBehavior.opaque,
-        onTap: _titleTapped,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text(
-            'SeniorNav',
-            style: TextStyle(
-              fontSize: compact ? 28 : 32,
-              fontWeight: FontWeight.w800,
-              color: const Color(0xFF16335B),
-            ),
-          ),
-        ),
+  double _textHeight(
+    BuildContext context,
+    String text,
+    TextStyle style,
+    double width,
+  ) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: DefaultTextStyle.of(context).style.merge(style),
       ),
-      Text(
-        '今天想去哪里？',
-        style: TextStyle(
-          fontSize: compact ? 23 : 28,
-          height: 1.25,
-          fontWeight: FontWeight.w700,
-          color: const Color(0xFF26374F),
-        ),
-      ),
-    ],
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout(maxWidth: width);
+    final height = painter.height;
+    painter.dispose();
+    return height;
+  }
+
+  Widget _header() => GestureDetector(
+    key: const ValueKey('family-entry'),
+    behavior: HitTestBehavior.opaque,
+    onTap: _titleTapped,
+    child: Container(
+      constraints: const BoxConstraints(minHeight: 56),
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: const Text('回家', style: _headerStyle),
+    ),
   );
 }
 
@@ -300,19 +334,9 @@ class _HomeTile extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             child: Row(
               children: [
-                Icon(icon, size: 34, color: inkColor),
+                Icon(icon, size: 40, color: inkColor),
                 const SizedBox(width: 18),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: const TextStyle(
-                      fontSize: 26,
-                      height: 1.2,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF172A43),
-                    ),
-                  ),
-                ),
+                Expanded(child: Text(label, style: _tileLabelStyle)),
               ],
             ),
           ),

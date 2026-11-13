@@ -46,7 +46,7 @@ class _StartupFailureAppState extends State<StartupFailureApp> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'SeniorNav',
+    title: '回家',
     locale: const Locale('zh', 'CN'),
     supportedLocales: const [Locale('zh', 'CN')],
     localizationsDelegates: const [

@@ -16,7 +16,7 @@ class SeniorNavApp extends StatelessWidget {
       brightness: Brightness.light,
     );
     return MaterialApp(
-      title: 'SeniorNav',
+      title: '回家',
       locale: const Locale('zh', 'CN'),
       supportedLocales: const [Locale('zh', 'CN')],
       localizationsDelegates: const [

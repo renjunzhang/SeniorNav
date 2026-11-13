@@ -7,7 +7,7 @@
     <!-- allowBackup=false：V1 的 SQLite 会存家庭住址与联系电话，
          Flutter 模板默认的 true 会让系统云备份把这些数据带走。 -->
     <application
-        android:label="SeniorNav"
+        android:label="回家"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false">

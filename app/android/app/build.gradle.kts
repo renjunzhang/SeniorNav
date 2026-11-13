@@ -35,6 +35,9 @@ android {
 
     buildTypes {
         release {
+            // Baidu's AARs ship empty consumer rules despite native/reflection entry points.
+            // Keep the SDK boundary; Flutter and application code still use normal R8 rules.
+            proguardFiles("proguard-rules.pro")
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")

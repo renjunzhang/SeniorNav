@@ -87,6 +87,7 @@ Map<String, dynamic>? _asMap(Object? raw) => raw is Map<String, dynamic> ? raw :
 RouteParseResult parseTransit(
   Map<String, dynamic> payload, {
   required DateTime fetchedAt,
+  RouteMode mode = RouteMode.transit,
 }) {
   final status = _asOptionalInt(payload['status']);
   if (status == null) {
@@ -108,7 +109,7 @@ RouteParseResult parseTransit(
     final route = _asMap(rawRoutes[i]);
     if (route == null) return RouteMalformed('routes[$i] 不是对象');
     try {
-      routes.add(_transitRoute(route, fetchedAt: fetchedAt));
+      routes.add(_transitRoute(route, fetchedAt: fetchedAt, mode: mode));
     } on FormatException catch (e) {
       return RouteMalformed('routes[$i]: ${e.message}');
     }
@@ -116,7 +117,10 @@ RouteParseResult parseTransit(
   return RouteParsed(routes);
 }
 
-RouteSummary _transitRoute(Map<String, dynamic> route, {required DateTime fetchedAt}) {
+RouteSummary _transitRoute(Map<String, dynamic> route, {
+  required DateTime fetchedAt,
+  required RouteMode mode,
+}) {
   final legs = <TransitLeg>[];
   var walkM = 0;
   var pendingWalkM = 0;
@@ -161,7 +165,7 @@ RouteSummary _transitRoute(Map<String, dynamic> route, {required DateTime fetche
   }
 
   return RouteSummary(
-    mode: RouteMode.transit,
+    mode: mode,
     durationSec: _asInt(route['duration'], context: 'route duration'),
     distanceM: _asInt(route['distance'], context: 'route distance'),
     walkM: walkM,
@@ -237,7 +241,9 @@ RouteSummary _walkingRoute(Map<String, dynamic> route, {required DateTime fetche
     for (final step in steps) {
       final raw = _asMap(step)?['instructions'];
       if (raw == null) continue;
-      if (_crossingWords.hasMatch(raw.toString().replaceAll(_htmlTags, ''))) crossings++;
+      if (_crossingWords.hasMatch(raw.toString().replaceAll(_htmlTags, ''))) {
+        crossings++;
+      }
     }
   }
 
