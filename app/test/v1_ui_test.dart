@@ -646,16 +646,30 @@ void main() {
         ],
       ),
     );
-    await tester.pumpWidget(SeniorNavApp(services: _services(cache: cache)));
+    final routes = _Routes();
+    await tester.pumpWidget(
+      SeniorNavApp(services: _services(routes: routes, cache: cache)),
+    );
     await tester.tap(find.byKey(const ValueKey('home-slot-1')));
     await tester.pumpAndSettle();
+    // 打开页面直接展示缓存，不发起查询，也没有失败原因。
+    expect(routes.calls, 0);
     expect(find.text('这是上次查询的路线'), findsOneWidget);
     expect(find.textContaining('可能已过期'), findsOneWidget);
-    expect(find.textContaining('网络不好，请打开百度地图。'), findsOneWidget);
+    expect(find.textContaining('点「重新查询」获取最新路线'), findsOneWidget);
+    expect(find.textContaining('网络不好'), findsNothing);
+    expect(find.text('上次查询位置'), findsOneWidget);
     expect(find.textContaining('${old.month}月${old.day}日'), findsWidgets);
     expect(find.textContaining('示例公交线'), findsOneWidget);
     expect(_modeSemantics(tester, RouteMode.transit).selected, isTrue);
     expect(find.text('路线已超过 5 分钟，请重新查询。'), findsNothing);
+    expect(cache.saves, 0);
+    // 重新查询失败后才展示失败原因，仍保留缓存路线。
+    await tester.tap(find.byKey(const ValueKey('refresh-routes')));
+    await tester.pumpAndSettle();
+    expect(routes.calls, 1);
+    expect(find.textContaining('网络不好，请打开百度地图。'), findsOneWidget);
+    expect(find.textContaining('示例公交线'), findsOneWidget);
     expect(cache.saves, 0);
     await tester.pumpWidget(const SizedBox());
   });
@@ -696,17 +710,57 @@ void main() {
         fetchedAt: now,
       ),
     );
+    final routes = _Routes();
     final navigation = _Navigation();
     await tester.pumpWidget(
-      SeniorNavApp(services: _services(navigation: navigation, cache: cache)),
+      SeniorNavApp(
+        services: _services(routes: routes, navigation: navigation, cache: cache),
+      ),
     );
     await tester.tap(find.byKey(const ValueKey('home-slot-1')));
     await tester.pumpAndSettle();
-    expect(find.text('这是上次查询的路线'), findsOneWidget);
+    // 5 分钟内的缓存按当前路线展示：不查询、无过期卡，但起点仍不传给导航。
+    expect(routes.calls, 0);
+    expect(find.text('这是上次查询的路线'), findsNothing);
     await tester.tap(find.byKey(const ValueKey('open-map')));
     await tester.pumpAndSettle();
     expect(navigation.lastMode, RouteMode.walking);
     expect(navigation.lastOrigin, isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('缓存展示时点重新查询，成功后按当前路线展示并覆盖缓存', (tester) async {
+    _size(tester);
+    final old = DateTime.now().subtract(const Duration(hours: 2));
+    final cache = _Cache();
+    cache.store[_place.id] = RouteBundle(
+      recommendedMode: RouteMode.transit,
+      fetchedAt: old,
+      transit: RouteSummary(
+        mode: RouteMode.transit,
+        durationSec: 1800,
+        distanceM: 6000,
+        fetchedAt: old,
+        legs: const [
+          TransitLeg(lineName: '示例公交线', lineType: LineType.bus),
+        ],
+      ),
+    );
+    final routes = _Routes()..handler = () async => _threeModes();
+    await tester.pumpWidget(
+      SeniorNavApp(services: _services(routes: routes, cache: cache)),
+    );
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    expect(routes.calls, 0);
+    expect(find.text('这是上次查询的路线'), findsOneWidget);
+    expect(find.text('上次查询位置'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('refresh-routes')));
+    await tester.pumpAndSettle();
+    expect(routes.calls, 1);
+    expect(cache.saves, 1);
+    expect(find.text('这是上次查询的路线'), findsNothing);
+    expect(find.textContaining('示例地铁线'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 }

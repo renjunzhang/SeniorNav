@@ -43,6 +43,7 @@ class _RoutePageState extends State<RoutePage> {
   bool _openingMap = false;
   String? _error;
   bool _fromCache = false;
+  bool _cacheSourced = false;
   String? _cacheReason;
   Timer? _slowTimer;
   Timer? _clockTimer;
@@ -73,7 +74,27 @@ class _RoutePageState extends State<RoutePage> {
     _load();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool force = false}) async {
+    // 打开页面先展示上次路线，不自动重查：老人途中重开时路线不会变。
+    // 5 分钟内的缓存按当前路线展示；更旧的明确标注过期。重新查询才强制新查询。
+    if (!force) {
+      final cached = await widget.services.cache.read(widget.place.id);
+      if (!mounted) return;
+      if (cached != null) {
+        final stale = _isStale(cached, DateTime.now());
+        setState(() {
+          _bundle = cached;
+          _cacheSourced = true;
+          _fromCache = stale;
+          _cacheReason = null;
+          _mode = cached.recommendedMode;
+          _error = null;
+          _waitingForPrevious = false;
+          _lastStale = stale;
+        });
+        return;
+      }
+    }
     if (_loading || widget.services.routes.busy) {
       if (mounted) {
         setState(() {
@@ -82,6 +103,7 @@ class _RoutePageState extends State<RoutePage> {
           _error = '上一条查询仍在处理，请稍候。也可以直接打开百度地图。';
           _bundle = null;
           _fromCache = false;
+          _cacheSourced = false;
           _cacheReason = null;
         });
       }
@@ -98,6 +120,7 @@ class _RoutePageState extends State<RoutePage> {
       _error = null;
       _bundle = null;
       _fromCache = false;
+      _cacheSourced = false;
       _cacheReason = null;
       _waitingForPrevious = false;
       _lastStale = false;
@@ -131,6 +154,7 @@ class _RoutePageState extends State<RoutePage> {
         setState(() {
           _bundle = cached;
           _fromCache = true;
+          _cacheSourced = true;
           _cacheReason = reason;
           if (!_modeSelectedDuringLoad) _mode = cached.recommendedMode;
         });
@@ -153,9 +177,9 @@ class _RoutePageState extends State<RoutePage> {
     setState(() => _openingMap = true);
     try {
       final bundle = _bundle;
-      // 缓存路线绝不带起点：即使缓存里混进了坐标也不传给导航。
+      // 缓存路线绝不带起点（无论新旧）：即使缓存里混进了坐标也不传给导航。
       final freshOrigin =
-          bundle != null && !_fromCache && !_isStale(bundle, DateTime.now())
+          bundle != null && !_cacheSourced && !_isStale(bundle, DateTime.now())
           ? bundle.origin
           : null;
       final outcome = await widget.services.navigation.open(
@@ -269,10 +293,12 @@ class _RoutePageState extends State<RoutePage> {
                           _NoticeCard(
                             icon: Icons.history_rounded,
                             title: '这是上次查询的路线',
-                            message:
-                                '${_cacheReason ?? '现在查不到新路线。'}\n'
-                                '下面是 ${_queryTime(bundle.fetchedAt, now)} 查到的路线，可能已过期。'
-                                '出发前请以百度地图为准。',
+                            message: _cacheReason != null
+                                ? '$_cacheReason\n'
+                                      '下面是 ${_queryTime(bundle.fetchedAt, now)} 查到的路线，可能已过期。'
+                                      '出发前请以百度地图为准。'
+                                : '下面是 ${_queryTime(bundle.fetchedAt, now)} 查到的路线，可能已过期。'
+                                      '点「重新查询」获取最新路线，出发前请以百度地图为准。',
                             warning: true,
                           ),
                           const SizedBox(height: 14),
@@ -296,6 +322,7 @@ class _RoutePageState extends State<RoutePage> {
                             route: route!,
                             summary: summary,
                             destination: widget.place.label,
+                            startLabel: _fromCache ? '上次查询位置' : '当前位置',
                           ),
                           for (final warning in summary.warnings) ...[
                             const SizedBox(height: 14),
@@ -375,7 +402,7 @@ class _RoutePageState extends State<RoutePage> {
                           key: const ValueKey('refresh-routes'),
                           onPressed: _loading || widget.services.routes.busy
                               ? null
-                              : _load,
+                              : () => _load(force: true),
                           child: Text(
                             _loading || widget.services.routes.busy
                                 ? '查询中，请稍候'
@@ -546,10 +573,12 @@ class _SummaryCard extends StatelessWidget {
     required this.route,
     required this.summary,
     required this.destination,
+    required this.startLabel,
   });
   final RouteSummary route;
   final SummaryText summary;
   final String destination;
+  final String startLabel;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -584,7 +613,7 @@ class _SummaryCard extends StatelessWidget {
         ],
         if (route.isTransit && route.legs.isNotEmpty) ...[
           const SizedBox(height: 12),
-          RouteStrip(route: route, destination: destination),
+          RouteStrip(route: route, destination: destination, startLabel: startLabel),
         ] else ...[
           if (route.isTransit) ...[
             const SizedBox(height: 12),

@@ -55,6 +55,7 @@ Future<void> _pump(
   RouteSummary route, {
   double scale = 1,
   String destination = '火车站',
+  String startLabel = '当前位置',
 }) async {
   tester.platformDispatcher.textScaleFactorTestValue = scale;
   addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
@@ -62,7 +63,11 @@ Future<void> _pump(
     MaterialApp(
       home: Scaffold(
         body: SingleChildScrollView(
-          child: RouteStrip(route: route, destination: destination),
+          child: RouteStrip(
+            route: route,
+            destination: destination,
+            startLabel: startLabel,
+          ),
         ),
       ),
     ),
@@ -84,6 +89,13 @@ void main() {
     expect(find.textContaining('坐 10 站'), findsOneWidget);
     expect(find.text('步行约 60 米'), findsOneWidget);
     expect(find.text('步行约 250 米'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('缓存路线的起点标签显示上次查询位置', (tester) async {
+    await _pump(tester, _direct(), startLabel: '上次查询位置');
+    expect(find.text('上次查询位置'), findsOneWidget);
+    expect(find.text('当前位置'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

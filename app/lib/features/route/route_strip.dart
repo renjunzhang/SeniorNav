@@ -12,10 +12,12 @@ class RouteStrip extends StatelessWidget {
     super.key,
     required this.route,
     required this.destination,
+    this.startLabel = '当前位置',
   });
 
   final RouteSummary route;
   final String destination;
+  final String startLabel;
 
   static const _ink = Color(0xFF16335B);
   static const _sub = Color(0xFF4D5E73);
@@ -38,7 +40,7 @@ class RouteStrip extends StatelessWidget {
         dot: _DotKind.start,
         top: _LineKind.none,
         bottom: _LineKind.walk,
-        content: const _PlaceName('当前位置'),
+        content: _PlaceName(startLabel),
       ),
     ];
     for (var i = 0; i < legs.length; i++) {
