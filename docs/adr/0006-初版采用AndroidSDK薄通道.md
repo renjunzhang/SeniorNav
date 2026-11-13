@@ -88,6 +88,6 @@ Flutter + Search SDK 的完整 debug / release APK 均已构建成功：debug �
 
 ## 最终产物审计补充
 
-最终 Release 57,384,095 B，已在目标真机覆盖安装并启动。解包 manifest 确认
+阶段性基线 Release（提交 `3e2810b`）57,384,095 B，已在目标真机覆盖安装并启动。解包 manifest 确认
 `allowBackup=false`，无后台定位与读取电话状态权限；产物扫描未命中服务端密钥与家庭地点数据。
 首屏与首次 PIN 设置入口已核对，实际家庭地点设置及户外出行验收仍未完成。
