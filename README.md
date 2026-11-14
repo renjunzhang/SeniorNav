@@ -97,6 +97,13 @@ flutter test          # 150 项测试
 行程管理均已实现并通过 150 项测试。老人实际使用、户外定位、目的地入口准确性与长期稳定性
 仍需真机验证；暂不包含内嵌导航、实时到站提醒与完整离线导航。
 
+## 开发贡献
+
+- **作者 / 维护**：zhang renjun（[@renjunzhang](https://github.com/renjunzhang)）——需求、真机验收与隐私把关。
+- **AI 辅助开发**：Qwen4-Max-Preview + Qoder——代码实现、测试与文档协作。
+
+欢迎通过 Issue / PR 参与改进；提交前请阅读 [Git 提交与隐私规则](docs/GIT_COMMIT_RULES.md)。
+
 ## 许可证
 
 [MIT](LICENSE) © 2026 zhang renjun
