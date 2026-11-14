@@ -108,6 +108,19 @@ class _Cache implements RouteCache {
   Future<RouteBundle?> read(String placeId) async => null;
 }
 
+class _Trip implements TripStore {
+  @override
+  Future<ActiveTrip?> readTrip() async => null;
+  @override
+  Future<void> startTrip(
+    String placeId,
+    RouteBundle bundle, {
+    DateTime? startedAt,
+  }) async {}
+  @override
+  Future<void> endTrip() async {}
+}
+
 void main() {
   late _Places places;
   late _Poi poi;
@@ -123,6 +136,7 @@ void main() {
             routes: _Routes(),
             navigation: navigation,
             cache: _Cache(),
+            trip: _Trip(),
           ),
         ),
       ),

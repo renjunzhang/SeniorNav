@@ -117,6 +117,37 @@ class _Cache implements RouteCache {
   Future<RouteBundle?> read(String placeId) async => store[placeId];
 }
 
+class _Trip implements TripStore {
+  ActiveTrip? trip;
+  int starts = 0;
+  int ends = 0;
+  Duration readDelay = Duration.zero;
+  @override
+  Future<ActiveTrip?> readTrip() async {
+    if (readDelay > Duration.zero) await Future<void>.delayed(readDelay);
+    return trip;
+  }
+  @override
+  Future<void> startTrip(
+    String placeId,
+    RouteBundle bundle, {
+    DateTime? startedAt,
+  }) async {
+    starts++;
+    trip = ActiveTrip(
+      placeId: placeId,
+      bundle: bundle,
+      startedAt: startedAt ?? DateTime.now(),
+    );
+  }
+
+  @override
+  Future<void> endTrip() async {
+    ends++;
+    trip = null;
+  }
+}
+
 void _size(
   WidgetTester tester, {
   double scale = 1,
@@ -135,12 +166,14 @@ AppServices _services({
   _Routes? routes,
   _Navigation? navigation,
   _Cache? cache,
+  _Trip? trip,
 }) => AppServices(
   places: places ?? _Places(saved: [_place]),
   poi: _Poi(),
   routes: routes ?? _Routes(),
   navigation: navigation ?? _Navigation(),
   cache: cache ?? _Cache(),
+  trip: trip ?? _Trip(),
 );
 
 Finder _modeFinder(RouteMode mode) =>
@@ -761,6 +794,410 @@ void main() {
     expect(cache.saves, 1);
     expect(find.text('这是上次查询的路线'), findsNothing);
     expect(find.textContaining('示例地铁线'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('开始行程钉住当前路线，重开不重查，导航不再带起点', (tester) async {
+    _size(tester);
+    final now = DateTime.now();
+    final routes = _Routes()
+      ..handler = () async => RouteBundle(
+        recommendedMode: RouteMode.metro,
+        fetchedAt: now,
+        origin: const GeoPoint(31.8, 117.3),
+        metro: RouteSummary(
+          mode: RouteMode.metro,
+          durationSec: 900,
+          distanceM: 5000,
+          fetchedAt: now,
+          legs: const [
+            TransitLeg(
+              lineName: '示例地铁线',
+              lineType: LineType.metro,
+              boardStop: '示例上车站',
+              alightStop: '示例下车站',
+              stopCount: 4,
+            ),
+          ],
+        ),
+      );
+    final navigation = _Navigation();
+    final trip = _Trip();
+    final services = _services(routes: routes, navigation: navigation, trip: trip);
+    await tester.pumpWidget(SeniorNavApp(services: services));
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    expect(routes.calls, 1);
+    // 新鲜查询的导航带起点。
+    await tester.tap(find.byKey(const ValueKey('open-map')));
+    await tester.pumpAndSettle();
+    expect(navigation.lastOrigin, isNotNull);
+    await tester.tap(find.byKey(const ValueKey('start-trip')));
+    await tester.pumpAndSettle();
+    expect(trip.starts, 1);
+    expect(trip.trip!.placeId, _place.id);
+    expect(find.text('行程进行中'), findsOneWidget);
+    expect(find.text('出发地'), findsOneWidget);
+    expect(find.byKey(const ValueKey('start-trip')), findsNothing);
+    // 行程路线绝不带起点，即使查询时拿到过定位。
+    await tester.tap(find.byKey(const ValueKey('open-map')));
+    await tester.pumpAndSettle();
+    expect(navigation.lastOrigin, isNull);
+    // 重开 App 再进页面：仍是钉住的路线，不重查。
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(SeniorNavApp(services: services));
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    expect(routes.calls, 1);
+    expect(find.text('行程进行中'), findsOneWidget);
+    expect(find.text('出发地'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('结束行程需二次确认，确认后回到缓存过期展示', (tester) async {
+    _size(tester);
+    final old = DateTime.now().subtract(const Duration(hours: 2));
+    final trip = _Trip()
+      ..trip = ActiveTrip(
+        placeId: _place.id,
+        startedAt: old,
+        bundle: RouteBundle(
+          recommendedMode: RouteMode.transit,
+          fetchedAt: old,
+          transit: RouteSummary(
+            mode: RouteMode.transit,
+            durationSec: 1800,
+            distanceM: 6000,
+            fetchedAt: old,
+            legs: const [
+              TransitLeg(
+                lineName: '示例公交线',
+                lineType: LineType.bus,
+                boardStop: '示例公交上车站',
+                alightStop: '示例公交下车站',
+                stopCount: 8,
+              ),
+            ],
+          ),
+        ),
+      );
+    final routes = _Routes();
+    await tester.pumpWidget(SeniorNavApp(services: _services(routes: routes, trip: trip)));
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    expect(routes.calls, 0);
+    expect(find.text('行程进行中'), findsOneWidget);
+    expect(find.textContaining('可能已过期'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('end-trip')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(trip.ends, 0);
+    expect(find.text('行程进行中'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('end-trip')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(of: find.byType(AlertDialog), matching: find.text('结束行程')),
+    );
+    await tester.pumpAndSettle();
+    expect(trip.ends, 1);
+    expect(trip.trip, isNull);
+    expect(find.text('行程进行中'), findsNothing);
+    expect(find.text('这是上次查询的路线'), findsOneWidget);
+    expect(find.text('上次查询位置'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('行程中重新查询成功重新钉住，保留出发时间', (tester) async {
+    _size(tester);
+    final start = DateTime(2026, 11, 14, 8);
+    final old = DateTime.now().subtract(const Duration(hours: 2));
+    final trip = _Trip()
+      ..trip = ActiveTrip(
+        placeId: _place.id,
+        startedAt: start,
+        bundle: RouteBundle(
+          recommendedMode: RouteMode.transit,
+          fetchedAt: old,
+          transit: RouteSummary(
+            mode: RouteMode.transit,
+            durationSec: 1800,
+            distanceM: 6000,
+            fetchedAt: old,
+            legs: const [
+              TransitLeg(lineName: '示例公交线', lineType: LineType.bus, stopCount: 8),
+            ],
+          ),
+        ),
+      );
+    final routes = _Routes()..handler = () async => _threeModes();
+    final cache = _Cache();
+    await tester.pumpWidget(
+      SeniorNavApp(services: _services(routes: routes, cache: cache, trip: trip)),
+    );
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    expect(routes.calls, 0);
+    await tester.tap(find.byKey(const ValueKey('refresh-routes')));
+    await tester.pumpAndSettle();
+    expect(routes.calls, 1);
+    expect(cache.saves, 1);
+    expect(trip.starts, 1);
+    expect(trip.trip!.startedAt, start);
+    expect(trip.trip!.bundle.metro, isNotNull);
+    expect(find.text('行程进行中'), findsOneWidget);
+    expect(find.textContaining('示例地铁线'), findsOneWidget);
+    expect(find.textContaining('可能已过期'), findsNothing);
+    expect(find.text('出发地'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('行程中重新查询失败保留钉住路线并写明原因', (tester) async {
+    _size(tester);
+    final old = DateTime.now().subtract(const Duration(hours: 2));
+    final pinned = RouteBundle(
+      recommendedMode: RouteMode.transit,
+      fetchedAt: old,
+      transit: RouteSummary(
+        mode: RouteMode.transit,
+        durationSec: 1800,
+        distanceM: 6000,
+        fetchedAt: old,
+        legs: const [
+          TransitLeg(lineName: '示例公交线', lineType: LineType.bus, stopCount: 8),
+        ],
+      ),
+    );
+    final trip = _Trip()
+      ..trip = ActiveTrip(placeId: _place.id, startedAt: old, bundle: pinned);
+    final routes = _Routes();
+    await tester.pumpWidget(SeniorNavApp(services: _services(routes: routes, trip: trip)));
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('refresh-routes')));
+    await tester.pumpAndSettle();
+    expect(routes.calls, 1);
+    expect(trip.trip!.bundle, same(pinned));
+    expect(find.text('行程进行中'), findsOneWidget);
+    expect(find.textContaining('网络不好，请打开百度地图。'), findsOneWidget);
+    expect(find.textContaining('示例公交线'), findsOneWidget);
+    expect(find.text('出发地'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('开始另一地点的行程需确认替换', (tester) async {
+    _size(tester);
+    final other = SavedPlace(
+      id: 'other-place',
+      slot: 2,
+      label: '医院',
+      icon: 'hospital',
+      name: '公共测试医院',
+      address: '示例地址',
+      city: '合肥',
+      latitude: 31.8,
+      longitude: 117.3,
+      updatedAt: DateTime(2026),
+      verifiedAt: DateTime(2026),
+    );
+    final trip = _Trip()
+      ..trip = ActiveTrip(
+        placeId: other.id,
+        startedAt: DateTime.now(),
+        bundle: _threeModes(),
+      );
+    final routes = _Routes()..handler = () async => _threeModes();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoutePage(
+          place: _place,
+          services: _services(
+            places: _Places(saved: [_place, other]),
+            routes: routes,
+            trip: trip,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('start-trip')));
+    await tester.pumpAndSettle();
+    expect(find.text('开始新行程？'), findsOneWidget);
+    expect(find.textContaining('当前有去「医院」的行程'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(trip.starts, 0);
+    expect(trip.trip!.placeId, other.id);
+    await tester.tap(find.byKey(const ValueKey('start-trip')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('结束并开始'));
+    await tester.pumpAndSettle();
+    expect(trip.starts, 1);
+    expect(trip.trip!.placeId, _place.id);
+    expect(find.text('行程进行中'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('首页行程横幅：继续进入钉住路线，结束需确认', (tester) async {
+    _size(tester, scale: 1.3);
+    final trip = _Trip()
+      ..trip = ActiveTrip(
+        placeId: _place.id,
+        startedAt: DateTime.now(),
+        bundle: _threeModes(),
+      );
+    final routes = _Routes();
+    await tester.pumpWidget(SeniorNavApp(services: _services(routes: routes, trip: trip)));
+    await tester.pumpAndSettle();
+    expect(find.text('正在去 回家'), findsOneWidget);
+    expect(find.byKey(const ValueKey('trip-continue')).hitTestable(), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('trip-continue')));
+    await tester.pumpAndSettle();
+    expect(routes.calls, 0);
+    expect(find.text('行程进行中'), findsOneWidget);
+    await tester.tap(find.byTooltip('返回'));
+    await tester.pumpAndSettle();
+    expect(find.text('正在去 回家'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('trip-end')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(of: find.byType(AlertDialog), matching: find.text('结束行程')),
+    );
+    await tester.pumpAndSettle();
+    expect(trip.ends, 1);
+    expect(find.text('正在去 回家'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('家属设置返回后首页行程横幅刷新', (tester) async {
+    _size(tester);
+    final trip = _Trip()
+      ..trip = ActiveTrip(
+        placeId: _place.id,
+        startedAt: DateTime.now(),
+        bundle: _threeModes(),
+      );
+    await tester.pumpWidget(SeniorNavApp(services: _services(trip: trip)));
+    await tester.pumpAndSettle();
+    expect(find.text('正在去 回家'), findsOneWidget);
+    for (var i = 0; i < 3; i++) {
+      await tester.tap(find.byKey(const ValueKey('family-entry')));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.pumpAndSettle();
+    expect(find.text('请输入家属密码'), findsOneWidget);
+    // 家属在设置里修改地点位置或删除地点时，仓库会清掉行程。
+    trip.trip = null;
+    await tester.tap(find.byTooltip('返回'));
+    await tester.pumpAndSettle();
+    expect(find.text('正在去 回家'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('结束行程确认框防连点，点框外不消失', (tester) async {
+    _size(tester);
+    final trip = _Trip()
+      ..trip = ActiveTrip(
+        placeId: _place.id,
+        startedAt: DateTime.now(),
+        bundle: _threeModes(),
+      );
+    await tester.pumpWidget(SeniorNavApp(services: _services(trip: trip)));
+    await tester.tap(find.byKey(const ValueKey('home-slot-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('end-trip')));
+    await tester.pumpAndSettle();
+    expect(find.text('结束行程？'), findsOneWidget);
+    // 老人手抖连点：第二下落在框外，不应把框点没，也不应再叠一个框。
+    await tester.tap(
+      find.byKey(const ValueKey('end-trip')),
+      warnIfMissed: false,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('结束行程？'), findsOneWidget);
+    expect(trip.ends, 0);
+    await tester.tap(
+      find.descendant(of: find.byType(AlertDialog), matching: find.text('结束行程')),
+    );
+    await tester.pumpAndSettle();
+    expect(trip.ends, 1);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('首页结束行程确认框防连点', (tester) async {
+    _size(tester);
+    final trip = _Trip()
+      ..trip = ActiveTrip(
+        placeId: _place.id,
+        startedAt: DateTime.now(),
+        bundle: _threeModes(),
+      );
+    await tester.pumpWidget(SeniorNavApp(services: _services(trip: trip)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('trip-end')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('trip-end')),
+      warnIfMissed: false,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('结束行程？'), findsOneWidget);
+    expect(trip.ends, 0);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(find.text('正在去 回家'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('开始行程读取期间连点只弹一个替换确认框', (tester) async {
+    _size(tester);
+    final other = SavedPlace(
+      id: 'other-place',
+      slot: 2,
+      label: '医院',
+      icon: 'hospital',
+      name: '公共测试医院',
+      address: '示例地址',
+      city: '合肥',
+      latitude: 31.8,
+      longitude: 117.3,
+      updatedAt: DateTime(2026),
+      verifiedAt: DateTime(2026),
+    );
+    final trip = _Trip()
+      ..readDelay = const Duration(milliseconds: 300)
+      ..trip = ActiveTrip(
+        placeId: other.id,
+        startedAt: DateTime.now(),
+        bundle: _threeModes(),
+      );
+    final routes = _Routes()..handler = () async => _threeModes();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoutePage(
+          place: _place,
+          services: _services(
+            places: _Places(saved: [_place, other]),
+            routes: routes,
+            trip: trip,
+          ),
+        ),
+      ),
+    );
+    // readTrip 带延迟且期间无帧调度，pumpAndSettle 不会等它，需显式推进时间。
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('start-trip')));
+    await tester.pump(const Duration(milliseconds: 50));
+    // 读取尚未返回、确认框还没弹出时再点一次，不应叠出第二个框。
+    await tester.tap(find.byKey(const ValueKey('start-trip')));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    expect(find.text('开始新行程？'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(trip.starts, 0);
+    expect(trip.trip!.placeId, other.id);
     await tester.pumpWidget(const SizedBox());
   });
 }

@@ -143,7 +143,7 @@ void main() {
     );
     final db = await databaseFactoryFfi.openDatabase(dbPath);
     expect((await db.query('places')).single['coordSystem'], 'BD-09');
-    expect(await db.getVersion(), 2);
+    expect(await db.getVersion(), 3);
     expect(repository.places.single.id, 'home');
   });
 
@@ -231,18 +231,67 @@ void main() {
     await repository.acceptPrivacy();
     await repository.savePlace(place('one', slot: 2));
     await repository.save('one', bundle());
+    await repository.startTrip('one', bundle());
     await repository.savePlace(place('one', slot: 2, label: '新名字'));
     expect(await repository.read('one'), isNotNull);
+    expect(await repository.readTrip(), isNotNull);
     await repository.savePlace(place('one', slot: 2, latitude: 31.9));
     expect(await repository.read('one'), isNull);
+    expect(await repository.readTrip(), isNull);
   });
 
   test('deleting a place clears its cache', () async {
     await repository.acceptPrivacy();
     await repository.savePlace(place('one', slot: 2));
     await repository.save('one', bundle());
+    await repository.startTrip('one', bundle());
     await repository.deletePlace('one');
     expect(await repository.read('one'), isNull);
+    expect(await repository.readTrip(), isNull);
+  });
+
+  test('active trip round-trips, replaces, ends, and never stores origin', () async {
+    await repository.acceptPrivacy();
+    await repository.savePlace(place('one', slot: 2));
+    await repository.savePlace(place('two', slot: 3));
+    expect(await repository.readTrip(), isNull);
+    final start = DateTime(2026, 11, 14, 8, 15);
+    await repository.startTrip(
+      'one',
+      bundle(origin: const GeoPoint(31.8, 117.3)),
+      startedAt: start,
+    );
+    final trip = await repository.readTrip();
+    expect(trip!.placeId, 'one');
+    expect(trip.startedAt, start);
+    expect(trip.bundle.transit!.legs.single.lineName, '1路');
+    expect(trip.bundle.origin, isNull);
+    final db = await databaseFactoryFfi.openDatabase(dbPath);
+    final raw = (await db.query('active_trip')).single['bundle'] as String;
+    expect(raw.contains('origin'), isFalse);
+    expect(raw.contains('31.8'), isFalse);
+    // 同路径共享同一连接，这里不能 close，否则仓库后续写入会失败。
+    // 重新钉住保留出发时间；开始另一地点的行程则替换。
+    await repository.startTrip(
+      'one',
+      bundle(at: DateTime(2026, 11, 14, 9)),
+      startedAt: start,
+    );
+    expect((await repository.readTrip())!.startedAt, start);
+    expect(
+      (await repository.readTrip())!.bundle.fetchedAt,
+      DateTime(2026, 11, 14, 9),
+    );
+    await repository.startTrip('two', bundle());
+    expect((await repository.readTrip())!.placeId, 'two');
+    await repository.close();
+    await repository.initialize();
+    expect((await repository.readTrip())!.placeId, 'two');
+    await repository.endTrip();
+    expect(await repository.readTrip(), isNull);
+    await repository.close();
+    await repository.initialize();
+    expect(await repository.readTrip(), isNull);
   });
 
   test('v1 database upgrades in place, keeping places and settings', () async {
@@ -294,7 +343,10 @@ void main() {
     await upgraded.save('one', bundle());
     expect((await upgraded.read('one'))!.transit!.legs.single.lineName, '1路');
     final db = await databaseFactoryFfi.openDatabase(v1Path);
-    expect(await db.getVersion(), 2);
+    expect(await db.getVersion(), 3);
+    await upgraded.startTrip('one', bundle());
+    expect((await upgraded.readTrip())!.placeId, 'one');
+    await upgraded.endTrip();
     await db.close();
     await upgraded.close();
     upgraded.dispose();

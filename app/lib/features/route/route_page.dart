@@ -50,6 +50,8 @@ class _RoutePageState extends State<RoutePage> {
   late bool _lastBusy;
   bool _lastStale = false;
   bool _waitingForPrevious = false;
+  ActiveTrip? _trip;
+  bool _tripBusy = false;
 
   @override
   void initState() {
@@ -67,7 +69,9 @@ class _RoutePageState extends State<RoutePage> {
         _lastStale = stale;
         if (!busy && _waitingForPrevious) {
           _waitingForPrevious = false;
-          _error = '可以重新查询路线，或直接打开百度地图。';
+          if (_trip == null) {
+            _error = '可以重新查询路线，或直接打开百度地图。';
+          }
         }
       });
     });
@@ -75,9 +79,26 @@ class _RoutePageState extends State<RoutePage> {
   }
 
   Future<void> _load({bool force = false}) async {
-    // 打开页面先展示上次路线，不自动重查：老人途中重开时路线不会变。
-    // 5 分钟内的缓存按当前路线展示；更旧的明确标注过期。重新查询才强制新查询。
+    // 打开页面先展示进行中的行程，其次上次路线，都不自动重查：
+    // 老人途中重开时路线不会变。重新查询才强制新查询。
     if (!force) {
+      final trip = await widget.services.trip.readTrip();
+      if (!mounted) return;
+      if (trip != null && trip.placeId == widget.place.id) {
+        setState(() {
+          _trip = trip;
+          _bundle = trip.bundle;
+          _cacheSourced = true;
+          _fromCache = false;
+          _cacheReason = null;
+          _mode = trip.bundle.recommendedMode;
+          _error = null;
+          _waitingForPrevious = false;
+          _lastStale = _isStale(trip.bundle, DateTime.now());
+        });
+        return;
+      }
+      _trip = null;
       final cached = await widget.services.cache.read(widget.place.id);
       if (!mounted) return;
       if (cached != null) {
@@ -97,6 +118,19 @@ class _RoutePageState extends State<RoutePage> {
     }
     if (_loading || widget.services.routes.busy) {
       if (mounted) {
+        if (_trip != null) {
+          // 行程中遇到在途请求：钉住的路线保持展示，只提示不重查。
+          setState(() {
+            _waitingForPrevious = true;
+            _lastBusy = widget.services.routes.busy;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('上一条查询仍在处理，请稍候，也可以直接打开百度地图。'),
+            ),
+          );
+          return;
+        }
         setState(() {
           _waitingForPrevious = !_loading;
           _lastBusy = widget.services.routes.busy;
@@ -141,11 +175,51 @@ class _RoutePageState extends State<RoutePage> {
           result.walking != null) {
         await widget.services.cache.save(widget.place.id, result);
       }
+      final trip = _trip;
+      if (trip != null) {
+        // 行程中重新查询成功：新路线重新钉住，出发时间不变。
+        try {
+          await widget.services.trip.startTrip(
+            widget.place.id,
+            result,
+            startedAt: trip.startedAt,
+          );
+          if (!mounted) return;
+          setState(() {
+            _trip = ActiveTrip(
+              placeId: trip.placeId,
+              bundle: result,
+              startedAt: trip.startedAt,
+            );
+            _cacheSourced = true;
+            _cacheReason = null;
+          });
+        } catch (_) {
+          if (!mounted) return;
+          setState(() {
+            _bundle = trip.bundle;
+            _cacheSourced = true;
+            _cacheReason = '新路线没有保存进行程，仍显示原路线。';
+            if (!_modeSelectedDuringLoad) _mode = trip.bundle.recommendedMode;
+          });
+        }
+      }
     } catch (error) {
       if (!mounted) return;
       final reason = error is AppFailure
           ? error.message
           : '暂时查不到路线，请打开百度地图。';
+      final trip = _trip;
+      if (trip != null) {
+        setState(() {
+          _bundle = trip.bundle;
+          _cacheSourced = true;
+          _fromCache = false;
+          _cacheReason = reason;
+          if (!_modeSelectedDuringLoad) _mode = trip.bundle.recommendedMode;
+        });
+        return;
+      }
       final cached = await widget.services.cache.read(widget.place.id);
       if (!mounted) return;
       if (cached == null) {
@@ -170,6 +244,118 @@ class _RoutePageState extends State<RoutePage> {
       _mode = mode;
       if (_loading) _modeSelectedDuringLoad = true;
     });
+  }
+
+  Future<void> _startTrip() async {
+    final bundle = _bundle;
+    if (bundle == null || _trip != null || _loading || _tripBusy) return;
+    _tripBusy = true;
+    try {
+      final existing = await widget.services.trip.readTrip();
+      if (!mounted) return;
+      if (existing != null && existing.placeId != widget.place.id) {
+        SavedPlace? other;
+        for (final item in widget.services.places.places) {
+          if (item.id == existing.placeId) {
+            other = item;
+            break;
+          }
+        }
+        final otherLabel = other?.label ?? '另一个地点';
+        final confirmed = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: const Text('开始新行程？'),
+            content: Text(
+              '当前有去「$otherLabel」的行程。'
+              '开始去「${widget.place.label}」会结束原来的行程。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('结束并开始'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true || !mounted) return;
+      }
+      try {
+        final now = DateTime.now();
+        await widget.services.trip.startTrip(
+          widget.place.id,
+          bundle,
+          startedAt: now,
+        );
+        if (!mounted) return;
+        setState(() {
+          _trip = ActiveTrip(
+            placeId: widget.place.id,
+            bundle: bundle,
+            startedAt: now,
+          );
+          // 行程路线同样不带起点：老人已移动，导航由百度重新定位。
+          _cacheSourced = true;
+          _fromCache = false;
+          _cacheReason = null;
+        });
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('行程没有开始成功，请稍后再试。')),
+        );
+      }
+    } finally {
+      _tripBusy = false;
+    }
+  }
+
+  Future<void> _endTrip() async {
+    if (_trip == null || _tripBusy) return;
+    _tripBusy = true;
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('结束行程？'),
+          content: Text('确定已结束去「${widget.place.label}」的行程？结束后首页不再显示这条行程。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('结束行程'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      try {
+        await widget.services.trip.endTrip();
+        if (!mounted) return;
+        setState(() {
+          _trip = null;
+          _cacheSourced = true;
+          _fromCache = _bundle != null && _isStale(_bundle!, DateTime.now());
+          _cacheReason = null;
+        });
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('行程没有结束成功，请稍后再试。')),
+        );
+      }
+    } finally {
+      _tripBusy = false;
+    }
   }
 
   Future<void> _openMap() async {
@@ -289,6 +475,16 @@ class _RoutePageState extends State<RoutePage> {
                           onSelect: _selectMode,
                         ),
                         const SizedBox(height: 20),
+                        if (_trip != null && bundle != null) ...[
+                          _NoticeCard(
+                            icon: Icons.trip_origin_rounded,
+                            title: '行程进行中',
+                            message: _tripMessage(_trip!, bundle, now),
+                            warning:
+                                _cacheReason != null || _isStale(bundle, now),
+                          ),
+                          const SizedBox(height: 14),
+                        ],
                         if (_fromCache && bundle != null) ...[
                           _NoticeCard(
                             icon: Icons.history_rounded,
@@ -322,7 +518,11 @@ class _RoutePageState extends State<RoutePage> {
                             route: route!,
                             summary: summary,
                             destination: widget.place.label,
-                            startLabel: _fromCache ? '上次查询位置' : '当前位置',
+                            startLabel: _trip != null
+                                ? '出发地'
+                                : _fromCache
+                                ? '上次查询位置'
+                                : '当前位置',
                           ),
                           for (final warning in summary.warnings) ...[
                             const SizedBox(height: 14),
@@ -350,6 +550,7 @@ class _RoutePageState extends State<RoutePage> {
                         if (bundle != null) ...[
                           const SizedBox(height: 20),
                           if (!_fromCache &&
+                              _trip == null &&
                               now.difference(bundle.fetchedAt) >
                                   const Duration(minutes: 5))
                             const Text(
@@ -398,17 +599,47 @@ class _RoutePageState extends State<RoutePage> {
                             textAlign: TextAlign.center,
                           ),
                         ),
-                        TextButton(
-                          key: const ValueKey('refresh-routes'),
-                          onPressed: _loading || widget.services.routes.busy
-                              ? null
-                              : () => _load(force: true),
-                          child: Text(
-                            _loading || widget.services.routes.busy
-                                ? '查询中，请稍候'
-                                : '重新查询',
+                        if (bundle != null && !_loading)
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _trip != null
+                                    ? TextButton(
+                                        key: const ValueKey('end-trip'),
+                                        onPressed: _endTrip,
+                                        child: const Text('结束行程'),
+                                      )
+                                    : FilledButton.tonal(
+                                        key: const ValueKey('start-trip'),
+                                        onPressed: _startTrip,
+                                        child: const Text('开始行程'),
+                                      ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextButton(
+                                  key: const ValueKey('refresh-routes'),
+                                  onPressed:
+                                      _loading || widget.services.routes.busy
+                                      ? null
+                                      : () => _load(force: true),
+                                  child: const Text('重新查询'),
+                                ),
+                              ),
+                            ],
+                          )
+                        else
+                          TextButton(
+                            key: const ValueKey('refresh-routes'),
+                            onPressed: _loading || widget.services.routes.busy
+                                ? null
+                                : () => _load(force: true),
+                            child: Text(
+                              _loading || widget.services.routes.busy
+                                  ? '查询中，请稍候'
+                                  : '重新查询',
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -423,6 +654,17 @@ class _RoutePageState extends State<RoutePage> {
 
   String _time(DateTime time) =>
       '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+
+  String _tripMessage(ActiveTrip trip, RouteBundle bundle, DateTime now) {
+    final start = _queryTime(trip.startedAt, now);
+    final reason = _cacheReason;
+    final prefix = reason != null ? '$reason\n' : '';
+    if (_isStale(bundle, now)) {
+      return '$prefix$start 开始。路线查于 ${_queryTime(bundle.fetchedAt, now)}，'
+          '可能已过期，点「重新查询」可更新。';
+    }
+    return '$prefix$start 开始。途中重开本页，仍显示这条路线。';
+  }
 
   // 跨天的缓存必须带日期，否则老人会把昨天的路线当成刚才查的。
   String _queryTime(DateTime time, DateTime now) {

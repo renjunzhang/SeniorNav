@@ -8,8 +8,9 @@ import 'package:sqflite/sqflite.dart' as sqlite;
 import '../core/contracts.dart';
 import 'route_cache.dart';
 
-/// 家庭地点与上次路线摘要只存本机；当前定位不进入此数据库。
-class LocalPlaceRepository extends PlaceRepository implements RouteCache {
+/// 家庭地点、上次路线摘要与进行中行程只存本机；当前定位不进入此数据库。
+class LocalPlaceRepository extends PlaceRepository
+    implements RouteCache, TripStore {
   LocalPlaceRepository({
     sqlite.DatabaseFactory? databaseFactory,
     this.databasePath,
@@ -42,7 +43,7 @@ class LocalPlaceRepository extends PlaceRepository implements RouteCache {
       _database = await _factory.openDatabase(
         location,
         options: sqlite.OpenDatabaseOptions(
-          version: 2,
+          version: 3,
           onCreate: (db, version) async {
             await db.execute('''
               CREATE TABLE places (
@@ -72,9 +73,11 @@ class LocalPlaceRepository extends PlaceRepository implements RouteCache {
               CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)
             ''');
             await _createRouteCache(db);
+            await _createActiveTrip(db);
           },
           onUpgrade: (db, oldVersion, newVersion) async {
             if (oldVersion < 2) await _createRouteCache(db);
+            if (oldVersion < 3) await _createActiveTrip(db);
           },
         ),
       );
@@ -98,6 +101,66 @@ class LocalPlaceRepository extends PlaceRepository implements RouteCache {
           bundle TEXT NOT NULL
         )
       ''');
+
+  static Future<void> _createActiveTrip(sqlite.DatabaseExecutor db) =>
+      db.execute('''
+        CREATE TABLE active_trip (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          placeId TEXT NOT NULL,
+          bundle TEXT NOT NULL,
+          startedAt INTEGER NOT NULL
+        )
+      ''');
+
+  @override
+  Future<ActiveTrip?> readTrip() async {
+    try {
+      await initialize();
+      final rows = await _db.query('active_trip', where: 'id = 1');
+      if (rows.isEmpty) return null;
+      final bundle = decodeRouteBundle(rows.first['bundle'] as String);
+      if (bundle == null) return null;
+      return ActiveTrip(
+        placeId: rows.first['placeId'] as String,
+        bundle: bundle,
+        startedAt: DateTime.fromMillisecondsSinceEpoch(
+          rows.first['startedAt'] as int,
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<void> startTrip(
+    String placeId,
+    RouteBundle bundle, {
+    DateTime? startedAt,
+  }) async {
+    try {
+      await initialize();
+      await _db.insert('active_trip', {
+        'id': 1,
+        'placeId': placeId,
+        'bundle': encodeRouteBundle(bundle),
+        'startedAt':
+            (startedAt ?? DateTime.now()).millisecondsSinceEpoch,
+      }, conflictAlgorithm: sqlite.ConflictAlgorithm.replace);
+    } catch (_) {
+      throw const AppFailure('行程没有保存成功，请稍后再试');
+    }
+  }
+
+  @override
+  Future<void> endTrip() async {
+    try {
+      await initialize();
+      await _db.delete('active_trip');
+    } catch (_) {
+      throw const AppFailure('行程没有结束成功，请稍后再试');
+    }
+  }
 
   @override
   Future<void> save(String placeId, RouteBundle bundle) async {
@@ -233,12 +296,17 @@ class LocalPlaceRepository extends PlaceRepository implements RouteCache {
             where: 'id = ?',
             whereArgs: [place.id],
           );
-          // 目的地变了，旧路线不再适用；只改名称/排序时保留缓存。
+          // 目的地变了，旧路线与进行中的行程不再适用；只改名称/排序时保留。
           if (existing.first['latitude'] != place.latitude ||
               existing.first['longitude'] != place.longitude ||
               existing.first['poiUid'] != place.poiUid) {
             await txn.delete(
               'route_cache',
+              where: 'placeId = ?',
+              whereArgs: [place.id],
+            );
+            await txn.delete(
+              'active_trip',
               where: 'placeId = ?',
               whereArgs: [place.id],
             );
@@ -277,6 +345,7 @@ class LocalPlaceRepository extends PlaceRepository implements RouteCache {
           whereArgs: [id],
         );
         await txn.delete('route_cache', where: 'placeId = ?', whereArgs: [id]);
+        await txn.delete('active_trip', where: 'placeId = ?', whereArgs: [id]);
       });
       await _reload();
     } on AppFailure {

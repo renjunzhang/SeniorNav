@@ -128,6 +128,30 @@ abstract interface class RouteCache {
   Future<RouteBundle?> read(String placeId);
 }
 
+/// 进行中的行程：出发时钉住一条路线，途中重开不变，直到显式结束。
+class ActiveTrip {
+  const ActiveTrip({
+    required this.placeId,
+    required this.bundle,
+    required this.startedAt,
+  });
+  final String placeId;
+  final RouteBundle bundle;
+  final DateTime startedAt;
+}
+
+/// 同一时刻只有一条进行中行程。行程路线同样不存起点坐标；
+/// 读取失败按无行程处理，开始/结束失败要抛异常让界面提示。
+abstract interface class TripStore {
+  Future<ActiveTrip?> readTrip();
+  Future<void> startTrip(
+    String placeId,
+    RouteBundle bundle, {
+    DateTime? startedAt,
+  });
+  Future<void> endTrip();
+}
+
 enum NavigationOutcome { nativeApp, web, unavailable }
 
 abstract interface class NavigationService {
@@ -153,10 +177,12 @@ class AppServices {
     required this.routes,
     required this.navigation,
     required this.cache,
+    required this.trip,
   });
   final PlaceRepository places;
   final PoiService poi;
   final RouteService routes;
   final NavigationService navigation;
   final RouteCache cache;
+  final TripStore trip;
 }

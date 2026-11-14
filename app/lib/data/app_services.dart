@@ -14,5 +14,6 @@ Future<AppServices> createAppServices() async {
     routes: SdkRouteService(client),
     navigation: BaiduNavigationService(),
     cache: places,
+    trip: places,
   );
 }

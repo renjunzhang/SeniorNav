@@ -19,6 +19,17 @@ const _headerStyle = TextStyle(
   fontWeight: FontWeight.w600,
   color: Color(0xFF53657D),
 );
+const _tripTitleStyle = TextStyle(
+  fontSize: 26,
+  height: 1.2,
+  fontWeight: FontWeight.w700,
+  color: Color(0xFF12623E),
+);
+const _tripSubStyle = TextStyle(
+  fontSize: 20,
+  height: 1.4,
+  color: Color(0xFF53657D),
+);
 const _slotIcons = [
   Icons.home_rounded,
   Icons.favorite_rounded,
@@ -64,6 +75,20 @@ class _HomePageState extends State<HomePage> {
   DateTime? _lastTitleTap;
   int _titleTaps = 0;
   bool _opening = false;
+  bool _tripBusy = false;
+  ActiveTrip? _trip;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshTrip();
+  }
+
+  Future<void> _refreshTrip() async {
+    final trip = await widget.services.trip.readTrip();
+    if (!mounted) return;
+    setState(() => _trip = trip);
+  }
 
   void _titleTapped() {
     final now = DateTime.now();
@@ -87,6 +112,8 @@ class _HomePageState extends State<HomePage> {
       ),
     );
     _opening = false;
+    // 家属可能改了地点位置或删除了地点，行程已在仓库里清除，横幅必须跟着刷新。
+    if (mounted) await _refreshTrip();
   }
 
   Future<void> _select(SavedPlace? place) async {
@@ -146,8 +173,46 @@ class _HomePageState extends State<HomePage> {
           builder: (_) => RoutePage(place: place, services: widget.services),
         ),
       );
+      if (mounted) await _refreshTrip();
     } finally {
       _opening = false;
+    }
+  }
+
+  Future<void> _endTripFromHome(SavedPlace place) async {
+    if (_tripBusy) return;
+    _tripBusy = true;
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('结束行程？'),
+          content: Text('确定已结束去「${place.label}」的行程？结束后首页不再显示这条行程。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('结束行程'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      try {
+        await widget.services.trip.endTrip();
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('行程没有结束成功，请稍后再试。')),
+        );
+      }
+      if (mounted) await _refreshTrip();
+    } finally {
+      _tripBusy = false;
     }
   }
 
@@ -163,6 +228,19 @@ class _HomePageState extends State<HomePage> {
               builder: (context, constraints) {
                 final textScale = MediaQuery.textScalerOf(context).scale(1);
                 final header = _header();
+                final trip = _trip;
+                SavedPlace? tripPlace;
+                if (trip != null) {
+                  for (final item in widget.services.places.places) {
+                    if (item.id == trip.placeId && item.deletedAt == null) {
+                      tripPlace = item;
+                      break;
+                    }
+                  }
+                }
+                final banner = trip != null && tripPlace != null
+                    ? _tripBanner(trip, tripPlace)
+                    : null;
                 final tiles = List<_HomeTile>.generate(5, (index) {
                   SavedPlace? place;
                   if (index < 4) {
@@ -185,14 +263,17 @@ class _HomePageState extends State<HomePage> {
                     color: _tileColors[index],
                     inkColor: _inkColors[index],
                     onTap: index == 4
-                        ? () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => MorePlacesPage(
-                                services: widget.services,
-                                onSelect: _select,
+                        ? () async {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => MorePlacesPage(
+                                  services: widget.services,
+                                  onSelect: _select,
+                                ),
                               ),
-                            ),
-                          )
+                            );
+                            if (mounted) await _refreshTrip();
+                          }
                         : () => _select(selected),
                   );
                 });
@@ -222,8 +303,38 @@ class _HomePageState extends State<HomePage> {
                       ) +
                       16,
                 );
+                // 行程横幅占用的高度从按钮空间里扣除；宁可高估让页面滚动，
+                // 也不把五个入口挤扁。无行程时高度为 0，布局与之前完全一致。
+                final bannerHeight = banner == null
+                    ? 0.0
+                    : 32 +
+                          4 +
+                          12 +
+                          12 +
+                          math.max(
+                            32.0,
+                            _textHeight(
+                              context,
+                              '正在去 ${tripPlace!.label}',
+                              _tripTitleStyle,
+                              labelWidth,
+                            ),
+                          ) +
+                          _textHeight(
+                            context,
+                            _tripSubtitle(trip!),
+                            _tripSubStyle,
+                            labelWidth,
+                          ) +
+                          math.max(72.0, 28.8 * textScale + 36);
                 final availableTileHeight =
-                    (constraints.maxHeight - 28 - headerHeight - 12 - 48) / 5;
+                    (constraints.maxHeight -
+                        28 -
+                        headerHeight -
+                        12 -
+                        48 -
+                        bannerHeight) /
+                    5;
                 final scroll =
                     textScale > 1.35 || availableTileHeight < minTileHeight;
                 return Padding(
@@ -235,6 +346,10 @@ class _HomePageState extends State<HomePage> {
                             children: [
                               header,
                               const SizedBox(height: 12),
+                              if (banner != null) ...[
+                                banner,
+                                const SizedBox(height: 12),
+                              ],
                               for (var i = 0; i < tiles.length; i++) ...[
                                 ConstrainedBox(
                                   constraints: const BoxConstraints(
@@ -253,6 +368,10 @@ class _HomePageState extends State<HomePage> {
                           children: [
                             header,
                             const SizedBox(height: 12),
+                            if (banner != null) ...[
+                              banner,
+                              const SizedBox(height: 12),
+                            ],
                             for (var i = 0; i < tiles.length; i++) ...[
                               Expanded(child: tiles[i]),
                               if (i < tiles.length - 1)
@@ -297,6 +416,70 @@ class _HomePageState extends State<HomePage> {
       alignment: Alignment.centerLeft,
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: const Text('回家', style: _headerStyle),
+    ),
+  );
+
+  String _tripSubtitle(ActiveTrip trip) {
+    final now = DateTime.now();
+    final time = trip.startedAt;
+    final clock =
+        '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    if (time.year == now.year &&
+        time.month == now.month &&
+        time.day == now.day) {
+      return '$clock 出发';
+    }
+    final date = time.year == now.year
+        ? '${time.month}月${time.day}日'
+        : '${time.year}年${time.month}月${time.day}日';
+    return '$date $clock 出发';
+  }
+
+  Widget _tripBanner(ActiveTrip trip, SavedPlace place) => Material(
+    color: const Color(0xFFE0F3E9),
+    borderRadius: BorderRadius.circular(22),
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.trip_origin_rounded,
+                size: 32,
+                color: Color(0xFF12623E),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text('正在去 ${place.label}', style: _tripTitleStyle),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(_tripSubtitle(trip), style: _tripSubStyle),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton(
+                  key: const ValueKey('trip-continue'),
+                  onPressed: () => _select(place),
+                  child: const Text('继续行程'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton(
+                  key: const ValueKey('trip-end'),
+                  onPressed: () => _endTripFromHome(place),
+                  child: const Text('结束行程'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     ),
   );
 }
